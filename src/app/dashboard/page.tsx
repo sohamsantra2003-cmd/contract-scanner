@@ -15,7 +15,10 @@ export default async function DashboardPage() {
 
   const { data: contracts } = await supabase
     .from("contracts")
-    .select("id, title, status, created_at, file_url")
+    .select(`
+      id, title, status, created_at, file_url,
+      scans ( risk_score, scanned_at )
+    `)
     .eq("user_id", user.id)
     .order("created_at", { ascending: false });
 

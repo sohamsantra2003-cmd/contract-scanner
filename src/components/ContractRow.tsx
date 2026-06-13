@@ -11,6 +11,7 @@ interface Contract {
   title: string;
   status: string;
   created_at: string;
+  scans?: { risk_score: number; scanned_at: string }[];
 }
 
 const statusStyles: Record<string, React.CSSProperties> = {
@@ -36,10 +37,20 @@ const statusStyles: Record<string, React.CSSProperties> = {
   },
 };
 
+function scoreStyle(score: number): React.CSSProperties {
+  if (score <= 29) return { background: "rgba(34,197,94,0.1)", color: "#4ade80", border: "0.5px solid rgba(34,197,94,0.2)" };
+  if (score <= 69) return { background: "rgba(234,179,8,0.1)", color: "#fbbf24", border: "0.5px solid rgba(234,179,8,0.2)" };
+  return { background: "rgba(239,68,68,0.1)", color: "#f87171", border: "0.5px solid rgba(239,68,68,0.2)" };
+}
+
 export function ContractRow({ contract }: { contract: Contract }) {
   const router = useRouter();
   const [confirming, setConfirming] = useState(false);
   const [deleting, setDeleting] = useState(false);
+
+  // Most recent scan score
+  const latestScore = contract.scans?.[0]?.risk_score;
+  const hasScore = contract.status === "complete" && latestScore !== undefined;
 
   async function handleDelete(e: React.MouseEvent) {
     e.stopPropagation();
@@ -109,7 +120,7 @@ export function ContractRow({ contract }: { contract: Contract }) {
         </p>
       </div>
 
-      {/* Right side — normal or confirm state */}
+      {/* Right side */}
       {confirming ? (
         <div className="flex items-center flex-shrink-0" style={{ gap: 6 }}>
           <span style={{ fontSize: 12, color: "rgba(255,255,255,0.35)", marginRight: 4 }}>
@@ -151,6 +162,21 @@ export function ContractRow({ contract }: { contract: Contract }) {
         </div>
       ) : (
         <div className="flex items-center flex-shrink-0" style={{ gap: 8 }}>
+          {/* Risk score badge — only on completed contracts */}
+          {hasScore && (
+            <span
+              style={{
+                ...scoreStyle(latestScore!),
+                fontSize: 10,
+                fontWeight: 500,
+                borderRadius: 4,
+                padding: "2px 6px",
+              }}
+            >
+              {latestScore}
+            </span>
+          )}
+
           <span
             style={{
               ...(statusStyles[contract.status] ?? statusStyles.pending),
@@ -163,7 +189,7 @@ export function ContractRow({ contract }: { contract: Contract }) {
           >
             {contract.status}
           </span>
-          {/* Trash — visible on hover via opacity, always in DOM */}
+
           <button
             onClick={onTrashClick}
             className="hover:opacity-100 transition-opacity"

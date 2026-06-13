@@ -26,6 +26,7 @@ interface Contract {
   status: string;
   created_at: string;
   file_url: string;
+  scans?: { risk_score: number; scanned_at: string }[];
 }
 
 const featureCards = [
