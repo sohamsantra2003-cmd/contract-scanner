@@ -7,7 +7,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -47,9 +46,10 @@ export default async function DashboardPage() {
               </span>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuLabel className="font-normal">
+              {/* Plain div — avoids Base UI GroupLabel-outside-Group crash */}
+              <div className="px-2 py-1.5">
                 <p className="text-sm font-medium truncate">{email}</p>
-              </DropdownMenuLabel>
+              </div>
               <DropdownMenuSeparator />
               <DropdownMenuItem>
                 <form action={signOut} className="w-full">
