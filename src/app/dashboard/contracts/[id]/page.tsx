@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, FileText } from "lucide-react";
@@ -67,6 +68,18 @@ export default async function ContractPage({ params }: PageProps) {
     .single();
 
   if (!contract) redirect("/dashboard");
+
+  // Generate a 1-hour signed URL via service role (works regardless of bucket visibility)
+  const adminSupabase = createAdminClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+  // Extract storage path from the stored public URL
+  const storagePath = contract.file_url.split("/storage/v1/object/public/contracts/")[1];
+  const { data: signedData } = await adminSupabase.storage
+    .from("contracts")
+    .createSignedUrl(storagePath, 3600);
+  const pdfUrl = signedData?.signedUrl ?? contract.file_url;
 
   const createdAt = new Date(contract.created_at).toLocaleDateString("en-US", {
     month: "short",
@@ -141,7 +154,7 @@ export default async function ContractPage({ params }: PageProps) {
             overflow: "hidden",
           }}
         >
-          <PDFViewer fileUrl={contract.file_url} />
+          <PDFViewer fileUrl={pdfUrl} />
         </div>
 
         {/* Right panel — Risk analysis (40% on desktop) */}
