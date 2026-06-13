@@ -1,96 +1,10 @@
-import { signIn, signInWithMagicLink } from "@/app/actions/auth";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
-import Link from "next/link";
+import { Suspense } from "react";
+import { LoginForm } from "./login-form";
 
-export default function LoginPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ error?: string; message?: string }>;
-}) {
+export default function LoginPage() {
   return (
-    <div className="min-h-screen flex items-center justify-center p-4">
-      <div className="w-full max-w-sm space-y-4">
-        <div className="text-center space-y-1">
-          <h1 className="text-2xl font-bold tracking-tight">Contract Scanner</h1>
-          <p className="text-muted-foreground text-sm">AI-powered contract risk analysis</p>
-        </div>
-
-        <Card className="border-border/50">
-          <CardHeader className="pb-4">
-            <CardTitle className="text-lg">Sign in</CardTitle>
-            <CardDescription>Enter your credentials to access your dashboard</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <StatusMessages searchParams={searchParams} />
-
-            {/* Password login */}
-            <form action={signIn} className="space-y-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="email">Email</Label>
-                <Input id="email" name="email" type="email" placeholder="you@example.com" required />
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="password">Password</Label>
-                <Input id="password" name="password" type="password" placeholder="••••••••" required />
-              </div>
-              <Button type="submit" className="w-full">
-                Sign in
-              </Button>
-            </form>
-
-            <div className="flex items-center gap-3">
-              <Separator className="flex-1" />
-              <span className="text-xs text-muted-foreground">or</span>
-              <Separator className="flex-1" />
-            </div>
-
-            {/* Magic link */}
-            <form action={signInWithMagicLink} className="space-y-3">
-              <div className="space-y-1.5">
-                <Label htmlFor="magic-email">Email</Label>
-                <Input id="magic-email" name="email" type="email" placeholder="you@example.com" required />
-              </div>
-              <Button type="submit" variant="outline" className="w-full">
-                Send magic link
-              </Button>
-            </form>
-
-            <p className="text-center text-sm text-muted-foreground">
-              No account?{" "}
-              <Link href="/signup" className="text-primary hover:underline underline-offset-4">
-                Sign up free
-              </Link>
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-    </div>
+    <Suspense>
+      <LoginForm />
+    </Suspense>
   );
-}
-
-async function StatusMessages({
-  searchParams,
-}: {
-  searchParams: Promise<{ error?: string; message?: string }>;
-}) {
-  const params = await searchParams;
-  if (params.error) {
-    return (
-      <div className="rounded-md bg-destructive/10 border border-destructive/20 px-3 py-2 text-sm text-destructive">
-        {params.error}
-      </div>
-    );
-  }
-  if (params.message) {
-    return (
-      <div className="rounded-md bg-primary/10 border border-primary/20 px-3 py-2 text-sm text-primary">
-        {params.message}
-      </div>
-    );
-  }
-  return null;
 }
