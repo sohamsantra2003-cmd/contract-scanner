@@ -3,6 +3,8 @@
 import { createClient as createSupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/server";
 
+type DeleteResult = { error?: string };
+
 type UploadResult =
   | { data: { id: string }; error?: never }
   | { error: string; data?: never };
@@ -66,4 +68,44 @@ export async function uploadContract(formData: FormData): Promise<UploadResult> 
   if (insertError) return { error: insertError.message };
 
   return { data: { id: contract.id } };
+}
+
+export async function deleteContract(contractId: string): Promise<DeleteResult> {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  if (!user) return { error: "Not authenticated" };
+
+  // Fetch contract to get file_url and verify ownership
+  const { data: contract } = await supabase
+    .from("contracts")
+    .select("id, file_url, user_id")
+    .eq("id", contractId)
+    .eq("user_id", user.id)
+    .single();
+
+  if (!contract) return { error: "Contract not found" };
+
+  // Extract storage path and delete file
+  const storagePath = contract.file_url.split("/storage/v1/object/public/contracts/")[1];
+  if (storagePath) {
+    const adminSupabase = createSupabaseClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.SUPABASE_SERVICE_ROLE_KEY!
+    );
+    await adminSupabase.storage.from("contracts").remove([storagePath]);
+  }
+
+  // Delete the DB row
+  const { error: deleteError } = await supabase
+    .from("contracts")
+    .delete()
+    .eq("id", contractId)
+    .eq("user_id", user.id);
+
+  if (deleteError) return { error: deleteError.message };
+
+  return {};
 }

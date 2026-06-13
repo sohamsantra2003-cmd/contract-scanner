@@ -2,52 +2,36 @@ import { createClient } from "@/lib/supabase/server";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, FileText } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { PDFViewer } from "@/components/PDFViewer";
+import { DeleteContractButton } from "@/components/DeleteContractButton";
 
 interface PageProps {
   params: Promise<{ id: string }>;
 }
 
-function statusBadge(status: string) {
-  const styles: Record<string, React.CSSProperties> = {
-    pending: {
-      background: "rgba(255,255,255,0.06)",
-      color: "rgba(255,255,255,0.4)",
-      border: "0.5px solid rgba(255,255,255,0.1)",
-    },
-    scanning: {
-      background: "rgba(234,179,8,0.1)",
-      color: "#fbbf24",
-      border: "0.5px solid rgba(234,179,8,0.2)",
-    },
-    complete: {
-      background: "rgba(34,197,94,0.1)",
-      color: "#4ade80",
-      border: "0.5px solid rgba(34,197,94,0.2)",
-    },
-    error: {
-      background: "rgba(239,68,68,0.1)",
-      color: "#f87171",
-      border: "0.5px solid rgba(239,68,68,0.2)",
-    },
-  };
-  const style = styles[status] ?? styles.uploaded;
-  return (
-    <span
-      style={{
-        ...style,
-        fontSize: 11,
-        fontWeight: 500,
-        borderRadius: 6,
-        padding: "3px 9px",
-        textTransform: "capitalize",
-      }}
-    >
-      {status}
-    </span>
-  );
-}
+const statusStyles: Record<string, React.CSSProperties> = {
+  pending: {
+    background: "rgba(255,255,255,0.06)",
+    color: "rgba(255,255,255,0.4)",
+    border: "0.5px solid rgba(255,255,255,0.1)",
+  },
+  scanning: {
+    background: "rgba(234,179,8,0.1)",
+    color: "#fbbf24",
+    border: "0.5px solid rgba(234,179,8,0.2)",
+  },
+  complete: {
+    background: "rgba(34,197,94,0.1)",
+    color: "#4ade80",
+    border: "0.5px solid rgba(34,197,94,0.2)",
+  },
+  error: {
+    background: "rgba(239,68,68,0.1)",
+    color: "#f87171",
+    border: "0.5px solid rgba(239,68,68,0.2)",
+  },
+};
 
 export default async function ContractPage({ params }: PageProps) {
   const { id } = await params;
@@ -59,7 +43,6 @@ export default async function ContractPage({ params }: PageProps) {
 
   if (!user) redirect("/login");
 
-  // Fetch contract — always filter by user_id to prevent cross-user access
   const { data: contract } = await supabase
     .from("contracts")
     .select("*")
@@ -69,32 +52,25 @@ export default async function ContractPage({ params }: PageProps) {
 
   if (!contract) redirect("/dashboard");
 
-  // Generate a 1-hour signed URL via service role (works regardless of bucket visibility)
+  // Generate a 1-hour signed URL (private bucket)
   const adminSupabase = createAdminClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
-  // Extract storage path from the stored public URL
   const storagePath = contract.file_url.split("/storage/v1/object/public/contracts/")[1];
   const { data: signedData } = await adminSupabase.storage
     .from("contracts")
     .createSignedUrl(storagePath, 3600);
   const pdfUrl = signedData?.signedUrl ?? contract.file_url;
 
-  const createdAt = new Date(contract.created_at).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const statusStyle = statusStyles[contract.status] ?? statusStyles.pending;
 
   return (
     <div
       className="flex flex-col"
       style={{ minHeight: "100vh", background: "#07070d", color: "#fff" }}
     >
-      {/* Page header */}
+      {/* ── Header ── */}
       <header
         style={{
           height: 60,
@@ -111,39 +87,65 @@ export default async function ContractPage({ params }: PageProps) {
           zIndex: 40,
         }}
       >
-        {/* Left: back + title */}
-        <div className="flex items-center" style={{ gap: 12, minWidth: 0 }}>
+        {/* Left: wordmark → breadcrumb */}
+        <div className="flex items-center min-w-0" style={{ gap: 10 }}>
+          {/* Wordmark */}
           <Link
             href="/dashboard"
-            className="flex items-center hover:opacity-70 transition-opacity flex-shrink-0"
-            style={{ gap: 6, fontSize: 13, color: "rgba(255,255,255,0.4)", textDecoration: "none" }}
+            className="flex items-center flex-shrink-0 hover:opacity-80 transition-opacity"
+            style={{ gap: 7, textDecoration: "none" }}
           >
-            <ArrowLeft size={15} />
-            Dashboard
+            <div
+              style={{
+                width: 26,
+                height: 26,
+                borderRadius: 7,
+                background: "linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                <polyline points="9 12 11 14 15 10"/>
+              </svg>
+            </div>
+            <span style={{ fontSize: 13.5, fontWeight: 500, color: "rgba(255,255,255,0.6)", letterSpacing: "-0.01em" }}>
+              Dashboard
+            </span>
           </Link>
-          <div style={{ width: "0.5px", height: 16, background: "rgba(255,255,255,0.1)", flexShrink: 0 }} />
-          <FileText size={15} color="#818cf8" style={{ flexShrink: 0 }} />
+
+          {/* Breadcrumb separator + filename */}
+          <ChevronRight size={14} color="rgba(255,255,255,0.15)" style={{ flexShrink: 0 }} />
           <span
             className="truncate"
-            style={{ fontSize: 14, fontWeight: 500, color: "rgba(255,255,255,0.85)", maxWidth: 300 }}
+            style={{ fontSize: 13.5, fontWeight: 500, color: "rgba(255,255,255,0.85)", letterSpacing: "-0.01em", maxWidth: 320 }}
           >
             {contract.title}
           </span>
         </div>
 
-        {/* Right: status + date */}
-        <div className="flex items-center flex-shrink-0" style={{ gap: 10 }}>
-          {statusBadge(contract.status)}
-          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.2)" }}>
-            {createdAt}
-          </span>
-        </div>
+        {/* Right: status badge */}
+        <span
+          style={{
+            ...statusStyle,
+            fontSize: 11,
+            fontWeight: 500,
+            borderRadius: 6,
+            padding: "3px 9px",
+            textTransform: "capitalize",
+            flexShrink: 0,
+          }}
+        >
+          {contract.status}
+        </span>
       </header>
 
-      {/* Two-panel layout */}
+      {/* ── Two-panel layout ── */}
       <div className="flex flex-col md:flex-row flex-1" style={{ minHeight: 0 }}>
 
-        {/* Left panel — PDF viewer (60% on desktop) */}
+        {/* Left panel — PDF viewer (60%) */}
         <div
           className="w-full md:w-3/5"
           style={{
@@ -157,12 +159,12 @@ export default async function ContractPage({ params }: PageProps) {
           <PDFViewer fileUrl={pdfUrl} />
         </div>
 
-        {/* Right panel — Risk analysis (40% on desktop) */}
+        {/* Right panel — actions (40%) */}
         <div
           className="w-full md:w-2/5 flex flex-col"
-          style={{ padding: "1.5rem", gap: 16, overflowY: "auto" }}
+          style={{ padding: "1.5rem", gap: 12, overflowY: "auto" }}
         >
-          {/* Risk card */}
+          {/* Risk analysis card */}
           <div
             style={{
               background: "rgba(255,255,255,0.025)",
@@ -194,7 +196,7 @@ export default async function ContractPage({ params }: PageProps) {
               We&apos;ll identify red flags and explain them in plain English.
             </p>
 
-            {/* Analyse button — wired up in Day 3 */}
+            {/* Analyse button — wired in Day 3 */}
             <button
               style={{
                 width: "100%",
@@ -214,7 +216,7 @@ export default async function ContractPage({ params }: PageProps) {
             </button>
           </div>
 
-          {/* Placeholder info cards */}
+          {/* Info hint */}
           <div
             style={{
               background: "rgba(99,102,241,0.05)",
@@ -226,6 +228,21 @@ export default async function ContractPage({ params }: PageProps) {
             <p style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", lineHeight: 1.6 }}>
               After analysis, you&apos;ll see a breakdown of risky clauses, severity ratings, and suggested rewrites — all in plain English.
             </p>
+          </div>
+
+          {/* Delete section */}
+          <div
+            style={{
+              background: "rgba(255,255,255,0.015)",
+              border: "0.5px solid rgba(255,255,255,0.05)",
+              borderRadius: 12,
+              padding: "1rem",
+            }}
+          >
+            <p style={{ fontSize: 11.5, fontWeight: 500, color: "rgba(255,255,255,0.25)", marginBottom: 10, letterSpacing: "0.04em", textTransform: "uppercase" }}>
+              Danger zone
+            </p>
+            <DeleteContractButton contractId={contract.id} />
           </div>
         </div>
       </div>

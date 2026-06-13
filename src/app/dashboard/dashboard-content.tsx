@@ -7,8 +7,6 @@ import {
   MessageSquare,
   PenLine,
   LogOut,
-  FileText,
-  ChevronRight,
   FilePlus,
 } from "lucide-react";
 import {
@@ -20,7 +18,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { signOut } from "@/app/actions/auth";
 import { UploadZone } from "@/components/UploadZone";
-import { formatDistanceToNow } from "date-fns";
+import { ContractRow } from "@/components/ContractRow";
 
 interface Contract {
   id: string;
@@ -36,28 +34,6 @@ const featureCards = [
   { Icon: PenLine, label: "Safer rewrites" },
 ];
 
-const statusStyles: Record<string, React.CSSProperties> = {
-  pending: {
-    background: "rgba(255,255,255,0.06)",
-    color: "rgba(255,255,255,0.4)",
-    border: "0.5px solid rgba(255,255,255,0.1)",
-  },
-  scanning: {
-    background: "rgba(234,179,8,0.1)",
-    color: "#fbbf24",
-    border: "0.5px solid rgba(234,179,8,0.2)",
-  },
-  complete: {
-    background: "rgba(34,197,94,0.1)",
-    color: "#4ade80",
-    border: "0.5px solid rgba(34,197,94,0.2)",
-  },
-  error: {
-    background: "rgba(239,68,68,0.1)",
-    color: "#f87171",
-    border: "0.5px solid rgba(239,68,68,0.2)",
-  },
-};
 
 function Navbar({ email, initials }: { email: string; initials: string }) {
   return (
@@ -211,7 +187,6 @@ export function DashboardContent({
   initials: string;
   contracts: Contract[];
 }) {
-  const router = useRouter();
   const hasContracts = contracts.length > 0;
 
   return (
@@ -264,71 +239,7 @@ export function DashboardContent({
           {/* Contract rows */}
           <div className="flex flex-col" style={{ gap: 8, marginBottom: "2rem" }}>
             {contracts.map((contract) => (
-              <div
-                key={contract.id}
-                className="flex items-center hover:opacity-90 transition-opacity"
-                onClick={() => router.push(`/dashboard/contracts/${contract.id}`)}
-                style={{
-                  background: "rgba(255,255,255,0.025)",
-                  border: "0.5px solid rgba(255,255,255,0.06)",
-                  borderRadius: 12,
-                  padding: "12px 16px",
-                  cursor: "pointer",
-                  gap: 12,
-                }}
-                onMouseEnter={(e) => {
-                  (e.currentTarget as HTMLDivElement).style.background = "rgba(255,255,255,0.04)";
-                }}
-                onMouseLeave={(e) => {
-                  (e.currentTarget as HTMLDivElement).style.background = "rgba(255,255,255,0.025)";
-                }}
-              >
-                {/* Icon */}
-                <div
-                  style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: 9,
-                    background: "rgba(99,102,241,0.1)",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    flexShrink: 0,
-                  }}
-                >
-                  <FileText size={18} color="#818cf8" />
-                </div>
-
-                {/* Title + date */}
-                <div className="flex-1 min-w-0">
-                  <p
-                    className="truncate"
-                    style={{ fontSize: 14, color: "rgba(255,255,255,0.85)", fontWeight: 500, marginBottom: 3 }}
-                  >
-                    {contract.title}
-                  </p>
-                  <p style={{ fontSize: 12, color: "rgba(255,255,255,0.25)" }}>
-                    {formatDistanceToNow(new Date(contract.created_at), { addSuffix: true })}
-                  </p>
-                </div>
-
-                {/* Status badge + arrow */}
-                <div className="flex items-center flex-shrink-0" style={{ gap: 10 }}>
-                  <span
-                    style={{
-                      ...(statusStyles[contract.status] ?? statusStyles.uploaded),
-                      fontSize: 11,
-                      fontWeight: 500,
-                      borderRadius: 6,
-                      padding: "3px 9px",
-                      textTransform: "capitalize",
-                    }}
-                  >
-                    {contract.status}
-                  </span>
-                  <ChevronRight size={16} color="rgba(255,255,255,0.2)" />
-                </div>
-              </div>
+              <ContractRow key={contract.id} contract={contract} />
             ))}
           </div>
 
