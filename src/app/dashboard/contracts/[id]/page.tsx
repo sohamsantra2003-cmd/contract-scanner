@@ -10,7 +10,7 @@ interface PageProps {
 
 function statusBadge(status: string) {
   const styles: Record<string, React.CSSProperties> = {
-    uploaded: {
+    pending: {
       background: "rgba(255,255,255,0.06)",
       color: "rgba(255,255,255,0.4)",
       border: "0.5px solid rgba(255,255,255,0.1)",

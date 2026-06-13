@@ -58,7 +58,7 @@ export async function uploadContract(formData: FormData): Promise<UploadResult> 
       user_id: user.id,
       file_url: urlData.publicUrl,
       title: file.name,
-      status: "uploaded",
+      status: "pending",
     })
     .select("id")
     .single();
