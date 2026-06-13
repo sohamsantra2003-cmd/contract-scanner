@@ -21,7 +21,7 @@ export default function SignupPage({
         <Card className="border-border/50">
           <CardHeader className="pb-4">
             <CardTitle className="text-lg">Create account</CardTitle>
-            <CardDescription>Get your first scan free — no credit card needed</CardDescription>
+            <CardDescription>Create an account to start scanning contracts</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <StatusMessages searchParams={searchParams} />
