@@ -3,7 +3,9 @@ import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
+import { formatDistanceToNow } from "date-fns";
 import { PDFViewer } from "@/components/PDFViewer";
+import { RiskPanel } from "@/components/RiskPanel";
 import { DeleteContractButton } from "@/components/DeleteContractButton";
 
 interface PageProps {
@@ -52,16 +54,26 @@ export default async function ContractPage({ params }: PageProps) {
 
   if (!contract) redirect("/dashboard");
 
-  // Generate a 1-hour signed URL (private bucket)
   const adminSupabase = createAdminClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
+
+  // Generate 1-hour signed URL for the PDF viewer
   const storagePath = contract.file_url.split("/storage/v1/object/public/contracts/")[1];
   const { data: signedData } = await adminSupabase.storage
     .from("contracts")
     .createSignedUrl(storagePath, 3600);
   const pdfUrl = signedData?.signedUrl ?? contract.file_url;
+
+  // Fetch most recent scan (if any) — use admin client to bypass RLS join complexity
+  const { data: existingScan } = await adminSupabase
+    .from("scans")
+    .select("*")
+    .eq("contract_id", contract.id)
+    .order("scanned_at", { ascending: false })
+    .limit(1)
+    .single();
 
   const statusStyle = statusStyles[contract.status] ?? statusStyles.pending;
 
@@ -89,7 +101,6 @@ export default async function ContractPage({ params }: PageProps) {
       >
         {/* Left: wordmark → breadcrumb */}
         <div className="flex items-center min-w-0" style={{ gap: 10 }}>
-          {/* Wordmark */}
           <Link
             href="/dashboard"
             className="flex items-center flex-shrink-0 hover:opacity-80 transition-opacity"
@@ -115,31 +126,35 @@ export default async function ContractPage({ params }: PageProps) {
               Dashboard
             </span>
           </Link>
-
-          {/* Breadcrumb separator + filename */}
           <ChevronRight size={14} color="rgba(255,255,255,0.15)" style={{ flexShrink: 0 }} />
           <span
             className="truncate"
-            style={{ fontSize: 13.5, fontWeight: 500, color: "rgba(255,255,255,0.85)", letterSpacing: "-0.01em", maxWidth: 320 }}
+            style={{ fontSize: 13.5, fontWeight: 500, color: "rgba(255,255,255,0.85)", letterSpacing: "-0.01em", maxWidth: 300 }}
           >
             {contract.title}
           </span>
         </div>
 
-        {/* Right: status badge */}
-        <span
-          style={{
-            ...statusStyle,
-            fontSize: 11,
-            fontWeight: 500,
-            borderRadius: 6,
-            padding: "3px 9px",
-            textTransform: "capitalize",
-            flexShrink: 0,
-          }}
-        >
-          {contract.status}
-        </span>
+        {/* Right: status badge + scanned timestamp */}
+        <div className="flex items-center flex-shrink-0" style={{ gap: 8 }}>
+          {existingScan && (
+            <span style={{ fontSize: 11.5, color: "rgba(255,255,255,0.2)" }}>
+              Scanned {formatDistanceToNow(new Date(existingScan.scanned_at))} ago
+            </span>
+          )}
+          <span
+            style={{
+              ...statusStyle,
+              fontSize: 11,
+              fontWeight: 500,
+              borderRadius: 6,
+              padding: "3px 9px",
+              textTransform: "capitalize",
+            }}
+          >
+            {contract.status}
+          </span>
+        </div>
       </header>
 
       {/* ── Two-panel layout ── */}
@@ -159,84 +174,34 @@ export default async function ContractPage({ params }: PageProps) {
           <PDFViewer fileUrl={pdfUrl} />
         </div>
 
-        {/* Right panel — actions (40%) */}
+        {/* Right panel — Risk analysis (40%), scrollable */}
         <div
-          className="w-full md:w-2/5 flex flex-col"
-          style={{ padding: "1.5rem", gap: 12, overflowY: "auto" }}
+          className="w-full md:w-2/5"
+          style={{
+            height: "calc(100vh - 60px)",
+            position: "sticky",
+            top: 60,
+            overflowY: "auto",
+            padding: "1.5rem",
+            display: "flex",
+            flexDirection: "column",
+            gap: 12,
+          }}
         >
-          {/* Risk analysis card */}
-          <div
-            style={{
-              background: "rgba(255,255,255,0.025)",
-              border: "0.5px solid rgba(255,255,255,0.07)",
-              borderRadius: 14,
-              padding: "1.25rem",
-            }}
-          >
-            <h2
-              style={{
-                fontSize: 15,
-                fontWeight: 500,
-                color: "#ffffff",
-                letterSpacing: "-0.01em",
-                marginBottom: 8,
-              }}
-            >
-              Risk Analysis
-            </h2>
-            <p
-              style={{
-                fontSize: 13,
-                color: "rgba(255,255,255,0.3)",
-                lineHeight: 1.6,
-                marginBottom: "1.25rem",
-              }}
-            >
-              Click &lsquo;Analyse contract&rsquo; to scan for risky clauses.
-              We&apos;ll identify red flags and explain them in plain English.
-            </p>
+          {/* RiskPanel — idle if no scan, done if scan exists */}
+          <RiskPanel
+            contractId={contract.id}
+            initialScan={existingScan ?? null}
+          />
 
-            {/* Analyse button — wired in Day 3 */}
-            <button
-              style={{
-                width: "100%",
-                background: "#4f46e5",
-                color: "white",
-                border: "none",
-                borderRadius: 10,
-                padding: "11px",
-                fontSize: 14,
-                fontWeight: 500,
-                letterSpacing: "-0.01em",
-                cursor: "pointer",
-                boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), 0 4px 16px rgba(79,70,229,0.3)",
-              }}
-            >
-              Analyse contract
-            </button>
-          </div>
-
-          {/* Info hint */}
-          <div
-            style={{
-              background: "rgba(99,102,241,0.05)",
-              border: "0.5px solid rgba(99,102,241,0.15)",
-              borderRadius: 12,
-              padding: "1rem",
-            }}
-          >
-            <p style={{ fontSize: 12, color: "rgba(255,255,255,0.3)", lineHeight: 1.6 }}>
-              After analysis, you&apos;ll see a breakdown of risky clauses, severity ratings, and suggested rewrites — all in plain English.
-            </p>
-          </div>
-
-          {/* Delete section */}
+          {/* Delete section — always visible below risk panel */}
           <div
             style={{
               background: "rgba(255,255,255,0.015)",
               border: "0.5px solid rgba(255,255,255,0.05)",
               borderRadius: 12,
               padding: "1rem",
+              marginTop: 4,
             }}
           >
             <p style={{ fontSize: 11.5, fontWeight: 500, color: "rgba(255,255,255,0.25)", marginBottom: 10, letterSpacing: "0.04em", textTransform: "uppercase" }}>
