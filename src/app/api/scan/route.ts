@@ -57,6 +57,20 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Contract not found" }, { status: 404 });
   }
 
+  const adminSupabase = createAdminClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+
+  // Read scans_used + tier for logging now; gate enforcement is Day 5
+  const { data: userRecord } = await adminSupabase
+    .from("users")
+    .select("scans_used, tier")
+    .eq("id", user.id)
+    .single();
+
+  console.log(`[scan] user ${user.id} scans_used=${userRecord?.scans_used} tier=${userRecord?.tier}`);
+
   // No updated_at column — skip stale-scan check, just block concurrent scans
   if (contract.status === "scanning") {
     return NextResponse.json({ error: "Scan already in progress" }, { status: 409 });
@@ -92,11 +106,6 @@ export async function POST(request: NextRequest) {
     .eq("id", contractId);
 
   // Step 4 — Generate signed URL and download PDF
-  const adminSupabase = createAdminClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
-
   const storagePath = contract.file_url.split("/storage/v1/object/public/contracts/")[1];
   const { data: signedData } = await adminSupabase.storage
     .from("contracts")
@@ -231,15 +240,11 @@ ${extractedText}`;
     );
   }
 
-  // Server-side score sanity check
+  // Score derived entirely from clause severities — deterministic, not from LLM's self-report
   const high = parsed.clauses.filter((c) => c.severity === "high").length;
   const medium = parsed.clauses.filter((c) => c.severity === "medium").length;
   const low = parsed.clauses.filter((c) => c.severity === "low").length;
-  const calculatedScore = Math.min(100, high * 30 + medium * 10 + low * 3);
-  const finalScore =
-    Math.abs(parsed.risk_score - calculatedScore) <= 20
-      ? parsed.risk_score
-      : calculatedScore;
+  const finalScore = Math.min(100, high * 20 + medium * 8 + low * 2);
 
   // Step 9 — Persist to scans table (admin client bypasses RLS — scans has no user_id column)
   const { data: scan, error: scanError } = await adminSupabase
@@ -266,6 +271,22 @@ ${extractedText}`;
     .from("contracts")
     .update({ status: "complete" })
     .eq("id", contractId);
+
+  // Step 10b — Increment scans_used (read-then-write; no RPC needed)
+  const { data: freshUser } = await adminSupabase
+    .from("users")
+    .select("scans_used")
+    .eq("id", user.id)
+    .single();
+
+  const { error: counterError } = await adminSupabase
+    .from("users")
+    .update({ scans_used: (freshUser?.scans_used ?? 0) + 1 })
+    .eq("id", user.id);
+
+  if (counterError) {
+    console.error("[scan] failed to increment scans_used:", counterError);
+  }
 
   // Step 11 — Return results
   const result: ScanResult = {

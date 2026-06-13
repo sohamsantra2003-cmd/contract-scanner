@@ -27,7 +27,6 @@ export function DeleteContractButton({ contractId, redirectTo = "/dashboard" }: 
       return;
     }
     router.push(redirectTo);
-    router.refresh();
   }
 
   if (confirming) {

@@ -160,9 +160,9 @@ function ClauseCard({ clause, isActive, targetPage, onClick }: ClauseCardProps) 
       onClick={onClick}
       style={{
         background: isActive ? "rgba(99,102,241,0.06)" : "rgba(255,255,255,0.02)",
-        border: isActive
-          ? "0.5px solid rgba(99,102,241,0.5)"
-          : "0.5px solid rgba(255,255,255,0.06)",
+        borderTop: isActive ? "0.5px solid rgba(99,102,241,0.5)" : "0.5px solid rgba(255,255,255,0.06)",
+        borderRight: isActive ? "0.5px solid rgba(99,102,241,0.5)" : "0.5px solid rgba(255,255,255,0.06)",
+        borderBottom: isActive ? "0.5px solid rgba(99,102,241,0.5)" : "0.5px solid rgba(255,255,255,0.06)",
         borderLeft: `3px solid ${severityColor(clause.severity)}`,
         borderRadius: 10,
         padding: 14,

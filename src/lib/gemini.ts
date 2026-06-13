@@ -35,7 +35,7 @@ export async function callGemini(
     body: JSON.stringify({
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       generationConfig: {
-        temperature: 0.1,
+        temperature: 0,
         maxOutputTokens: 8192,
       },
     }),
