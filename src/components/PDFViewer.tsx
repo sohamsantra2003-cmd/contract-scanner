@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import { ChevronLeft, ChevronRight, ZoomIn, ZoomOut } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -11,26 +11,81 @@ pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 
 interface PDFViewerProps {
   fileUrl: string;
+  currentPage?: number;
+  onPageChange?: (page: number) => void;
+  onTextExtracted?: (texts: string[]) => void;
 }
 
-export function PDFViewer({ fileUrl }: PDFViewerProps) {
+// Runs after document load — non-blocking, failures are silent
+async function extractPageTexts(
+  pdf: { numPages: number; getPage: (n: number) => Promise<any> },
+  onExtracted: (texts: string[]) => void
+) {
+  try {
+    const texts: string[] = [];
+    for (let i = 1; i <= pdf.numPages; i++) {
+      try {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        const text = (content.items as any[])
+          .map((item: any) => item.str ?? "")
+          .join(" ");
+        texts.push(text);
+      } catch {
+        texts.push(""); // single page failure must not crash the viewer
+      }
+    }
+    onExtracted(texts);
+  } catch {
+    // text extraction is non-critical; viewer works without it
+  }
+}
+
+export function PDFViewer({
+  fileUrl,
+  currentPage,
+  onPageChange,
+  onTextExtracted,
+}: PDFViewerProps) {
   const [numPages, setNumPages] = useState<number>(0);
-  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [internalPage, setInternalPage] = useState<number>(1);
   const [scale, setScale] = useState<number>(1.0);
   const [loadError, setLoadError] = useState<boolean>(false);
 
-  const onDocumentLoadSuccess = useCallback(
-    ({ numPages }: { numPages: number }) => {
-      setNumPages(numPages);
-      setCurrentPage(1);
-    },
-    []
-  );
+  // Stable ref so the useCallback below doesn't need onTextExtracted as a dep
+  const onTextExtractedRef = useRef(onTextExtracted);
+  useEffect(() => {
+    onTextExtractedRef.current = onTextExtracted;
+  }, [onTextExtracted]);
 
-  const prevPage = () => setCurrentPage((p) => Math.max(1, p - 1));
-  const nextPage = () => setCurrentPage((p) => Math.min(numPages, p + 1));
+  // Controlled page: sync external currentPage prop → internal state
+  useEffect(() => {
+    if (currentPage !== undefined && currentPage !== internalPage) {
+      setInternalPage(currentPage);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPage]);
+
+  const goToPage = (page: number) => {
+    setInternalPage(page);
+    onPageChange?.(page);
+  };
+
+  const prevPage = () => goToPage(Math.max(1, internalPage - 1));
+  const nextPage = () => goToPage(Math.min(numPages, internalPage + 1));
   const zoomIn = () => setScale((s) => Math.min(2.0, +(s + 0.25).toFixed(2)));
   const zoomOut = () => setScale((s) => Math.max(0.5, +(s - 0.25).toFixed(2)));
+
+  const onDocumentLoadSuccess = useCallback(
+    (pdf: any) => {
+      setNumPages(pdf.numPages);
+      setInternalPage(1);
+      if (onTextExtractedRef.current) {
+        extractPageTexts(pdf, onTextExtractedRef.current);
+      }
+    },
+    [] // stable — callback read through ref at call-time
+  );
 
   if (loadError) {
     return (
@@ -59,18 +114,28 @@ export function PDFViewer({ fileUrl }: PDFViewerProps) {
           onLoadError={() => setLoadError(true)}
           loading={
             <Skeleton
-              style={{ width: 595, height: 600, borderRadius: 6, background: "rgba(255,255,255,0.04)" }}
+              style={{
+                width: 595,
+                height: 600,
+                borderRadius: 6,
+                background: "rgba(255,255,255,0.04)",
+              }}
             />
           }
         >
           <Page
-            pageNumber={currentPage}
+            pageNumber={internalPage}
             scale={scale}
             renderTextLayer
             renderAnnotationLayer
             loading={
               <Skeleton
-                style={{ width: 595 * scale, height: 842 * scale, borderRadius: 6, background: "rgba(255,255,255,0.04)" }}
+                style={{
+                  width: 595 * scale,
+                  height: 842 * scale,
+                  borderRadius: 6,
+                  background: "rgba(255,255,255,0.04)",
+                }}
               />
             }
           />
@@ -97,18 +162,25 @@ export function PDFViewer({ fileUrl }: PDFViewerProps) {
         <div className="flex items-center" style={{ gap: 8 }}>
           <button
             onClick={prevPage}
-            disabled={currentPage <= 1}
-            style={navBtnStyle(currentPage <= 1)}
+            disabled={internalPage <= 1}
+            style={navBtnStyle(internalPage <= 1)}
           >
             <ChevronLeft size={14} />
           </button>
-          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", minWidth: 80, textAlign: "center" }}>
-            Page {currentPage} of {numPages || "—"}
+          <span
+            style={{
+              fontSize: 12,
+              color: "rgba(255,255,255,0.4)",
+              minWidth: 80,
+              textAlign: "center",
+            }}
+          >
+            Page {internalPage} of {numPages || "—"}
           </span>
           <button
             onClick={nextPage}
-            disabled={currentPage >= numPages}
-            style={navBtnStyle(currentPage >= numPages)}
+            disabled={internalPage >= numPages}
+            style={navBtnStyle(internalPage >= numPages)}
           >
             <ChevronRight size={14} />
           </button>
@@ -116,14 +188,31 @@ export function PDFViewer({ fileUrl }: PDFViewerProps) {
 
         {/* Zoom controls */}
         <div className="flex items-center" style={{ gap: 8 }}>
-          <div style={{ width: "0.5px", height: 16, background: "rgba(255,255,255,0.08)" }} />
-          <button onClick={zoomOut} disabled={scale <= 0.5} style={navBtnStyle(scale <= 0.5)}>
+          <div
+            style={{ width: "0.5px", height: 16, background: "rgba(255,255,255,0.08)" }}
+          />
+          <button
+            onClick={zoomOut}
+            disabled={scale <= 0.5}
+            style={navBtnStyle(scale <= 0.5)}
+          >
             <ZoomOut size={13} />
           </button>
-          <span style={{ fontSize: 12, color: "rgba(255,255,255,0.4)", minWidth: 42, textAlign: "center" }}>
+          <span
+            style={{
+              fontSize: 12,
+              color: "rgba(255,255,255,0.4)",
+              minWidth: 42,
+              textAlign: "center",
+            }}
+          >
             {Math.round(scale * 100)}%
           </span>
-          <button onClick={zoomIn} disabled={scale >= 2.0} style={navBtnStyle(scale >= 2.0)}>
+          <button
+            onClick={zoomIn}
+            disabled={scale >= 2.0}
+            style={navBtnStyle(scale >= 2.0)}
+          >
             <ZoomIn size={13} />
           </button>
         </div>

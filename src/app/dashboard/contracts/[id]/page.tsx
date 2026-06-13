@@ -4,9 +4,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
-import { PDFViewer } from "@/components/PDFViewer";
-import { RiskPanel } from "@/components/RiskPanel";
-import { DeleteContractButton } from "@/components/DeleteContractButton";
+import ContractViewer from "@/components/ContractViewer";
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -74,6 +72,24 @@ export default async function ContractPage({ params }: PageProps) {
     .order("scanned_at", { ascending: false })
     .limit(1)
     .single();
+
+  // Map raw DB row → ScanResult shape that RiskPanel expects
+  const initialScan = existingScan
+    ? {
+        id: existingScan.id as string,
+        risk_score: existingScan.risk_score as number,
+        summary: existingScan.summary as string,
+        clauses: (existingScan.risk_json ?? []) as {
+          text: string;
+          category: "payment_terms" | "liability" | "auto_renewal" | "IP" | "termination" | "other";
+          severity: "high" | "medium" | "low";
+          explanation: string;
+          rewrite: string;
+        }[],
+        tokens_used: existingScan.tokens_used as number,
+        scanned_at: existingScan.scanned_at as string,
+      }
+    : null;
 
   const statusStyle = statusStyles[contract.status] ?? statusStyles.pending;
 
@@ -157,60 +173,12 @@ export default async function ContractPage({ params }: PageProps) {
         </div>
       </header>
 
-      {/* ── Two-panel layout ── */}
-      <div className="flex flex-col md:flex-row flex-1" style={{ minHeight: 0 }}>
-
-        {/* Left panel — PDF viewer (60%) */}
-        <div
-          className="w-full md:w-3/5"
-          style={{
-            borderRight: "0.5px solid rgba(255,255,255,0.06)",
-            height: "calc(100vh - 60px)",
-            position: "sticky",
-            top: 60,
-            overflow: "hidden",
-          }}
-        >
-          <PDFViewer fileUrl={pdfUrl} />
-        </div>
-
-        {/* Right panel — Risk analysis (40%), scrollable */}
-        <div
-          className="w-full md:w-2/5"
-          style={{
-            height: "calc(100vh - 60px)",
-            position: "sticky",
-            top: 60,
-            overflowY: "auto",
-            padding: "1.5rem",
-            display: "flex",
-            flexDirection: "column",
-            gap: 12,
-          }}
-        >
-          {/* RiskPanel — idle if no scan, done if scan exists */}
-          <RiskPanel
-            contractId={contract.id}
-            initialScan={existingScan ?? null}
-          />
-
-          {/* Delete section — always visible below risk panel */}
-          <div
-            style={{
-              background: "rgba(255,255,255,0.015)",
-              border: "0.5px solid rgba(255,255,255,0.05)",
-              borderRadius: 12,
-              padding: "1rem",
-              marginTop: 4,
-            }}
-          >
-            <p style={{ fontSize: 11.5, fontWeight: 500, color: "rgba(255,255,255,0.25)", marginBottom: 10, letterSpacing: "0.04em", textTransform: "uppercase" }}>
-              Danger zone
-            </p>
-            <DeleteContractButton contractId={contract.id} />
-          </div>
-        </div>
-      </div>
+      {/* ── Two-panel layout (client-owned state via ContractViewer) ── */}
+      <ContractViewer
+        pdfUrl={pdfUrl}
+        contractId={contract.id}
+        initialScan={initialScan}
+      />
     </div>
   );
 }

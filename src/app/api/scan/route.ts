@@ -3,6 +3,12 @@ import { createClient } from "@/lib/supabase/server";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { callGemini } from "@/lib/gemini";
 import { PDFParse } from "pdf-parse";
+import { getPath as getPdfWorkerPath } from "pdf-parse/worker";
+
+// Set pdfjs worker path once at module load so the FakeWorker fallback
+// resolves to an actual file rather than the relative "./pdf.worker.mjs"
+// which would be missing in the compiled Next.js output directory.
+PDFParse.setWorker(getPdfWorkerPath());
 
 type Clause = {
   text: string;
@@ -114,7 +120,8 @@ export async function POST(request: NextRequest) {
     const parser = new PDFParse({ data: Buffer.from(pdfBuffer) });
     const pdfData = await parser.getText();
     extractedText = pdfData.text?.trim() ?? "";
-  } catch {
+  } catch (pdfErr) {
+    console.error("PDF text extraction failed:", pdfErr);
     await supabase.from("contracts").update({ status: "error" }).eq("id", contractId);
     return NextResponse.json(
       { error: "Failed to read the PDF file. The file may be corrupted." },
@@ -234,8 +241,8 @@ ${extractedText}`;
       ? parsed.risk_score
       : calculatedScore;
 
-  // Step 9 — Persist to scans table
-  const { data: scan, error: scanError } = await supabase
+  // Step 9 — Persist to scans table (admin client bypasses RLS — scans has no user_id column)
+  const { data: scan, error: scanError } = await adminSupabase
     .from("scans")
     .insert({
       contract_id: contractId,

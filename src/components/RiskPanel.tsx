@@ -72,6 +72,34 @@ function categoryLabel(cat: string) {
   return map[cat] ?? cat;
 }
 
+function findClausePage(clauseText: string, pageTexts: string[]): number {
+  if (!pageTexts.length) return 1;
+
+  const normalise = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
+  const needle = normalise(clauseText).slice(0, 120);
+
+  // Exact substring match first
+  for (let i = 0; i < pageTexts.length; i++) {
+    if (normalise(pageTexts[i]).includes(needle)) return i + 1;
+  }
+
+  // Fallback: word overlap scoring (ignore short words)
+  const needleWords = new Set(needle.split(" ").filter((w) => w.length > 4));
+  let bestPage = 1;
+  let bestScore = 0;
+
+  pageTexts.forEach((text, i) => {
+    const pageWords = normalise(text).split(" ");
+    const matches = pageWords.filter((w) => needleWords.has(w)).length;
+    if (matches > bestScore) {
+      bestScore = matches;
+      bestPage = i + 1;
+    }
+  });
+
+  return bestPage;
+}
+
 const CATEGORY_KEYS = ["all", "payment_terms", "liability", "auto_renewal", "IP", "termination", "other"] as const;
 const SEVERITY_KEYS = ["all", "high", "medium", "low"] as const;
 
@@ -80,11 +108,11 @@ const SEVERITY_KEYS = ["all", "high", "medium", "low"] as const;
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
 
-  async function handleCopy() {
+  async function handleCopy(e: React.MouseEvent) {
+    e.stopPropagation(); // don't bubble to clause card click
     try {
       await navigator.clipboard.writeText(text);
     } catch {
-      // Fallback for older browsers
       const el = document.createElement("textarea");
       el.value = text;
       document.body.appendChild(el);
@@ -116,22 +144,34 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-function ClauseCard({ clause }: { clause: Clause }) {
+interface ClauseCardProps {
+  clause: Clause;
+  isActive: boolean;
+  targetPage: number | null;
+  onClick: () => void;
+}
+
+function ClauseCard({ clause, isActive, targetPage, onClick }: ClauseCardProps) {
   const [expanded, setExpanded] = useState(false);
   const isLong = clause.text.length > 200;
 
   return (
     <div
+      onClick={onClick}
       style={{
-        background: "rgba(255,255,255,0.02)",
-        border: "0.5px solid rgba(255,255,255,0.06)",
+        background: isActive ? "rgba(99,102,241,0.06)" : "rgba(255,255,255,0.02)",
+        border: isActive
+          ? "0.5px solid rgba(99,102,241,0.5)"
+          : "0.5px solid rgba(255,255,255,0.06)",
         borderLeft: `3px solid ${severityColor(clause.severity)}`,
         borderRadius: 10,
         padding: 14,
         marginBottom: 8,
+        cursor: "pointer",
+        transition: "background 0.15s, border-color 0.15s",
       }}
     >
-      {/* Top row: severity + category */}
+      {/* Top row: severity badge + category + page jump label */}
       <div className="flex items-center justify-between" style={{ marginBottom: 8 }}>
         <span
           style={{
@@ -148,9 +188,23 @@ function ClauseCard({ clause }: { clause: Clause }) {
         >
           {clause.severity}
         </span>
-        <span style={{ fontSize: 10.5, color: "rgba(255,255,255,0.25)" }}>
-          {categoryLabel(clause.category)}
-        </span>
+        <div className="flex items-center" style={{ gap: 6 }}>
+          <span style={{ fontSize: 10.5, color: "rgba(255,255,255,0.25)" }}>
+            {categoryLabel(clause.category)}
+          </span>
+          {targetPage !== null && (
+            <span
+              style={{
+                fontSize: 10,
+                color: isActive ? "#818cf8" : "rgba(255,255,255,0.2)",
+                fontWeight: isActive ? 500 : 400,
+                transition: "color 0.15s",
+              }}
+            >
+              → p.{targetPage}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Quoted clause text */}
@@ -171,7 +225,7 @@ function ClauseCard({ clause }: { clause: Clause }) {
       </p>
       {isLong && (
         <button
-          onClick={() => setExpanded((e) => !e)}
+          onClick={(e) => { e.stopPropagation(); setExpanded((x) => !x); }}
           style={{
             background: "none",
             border: "none",
@@ -227,10 +281,7 @@ function ScanningView() {
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
-    // Jump to 30% after 300ms
     const jumpTimer = setTimeout(() => setProgress(30), 300);
-
-    // Crawl from 30 → 85 over ~10s
     intervalRef.current = setInterval(() => {
       setProgress((p) => {
         if (p >= 85) {
@@ -240,10 +291,7 @@ function ScanningView() {
         return p + 0.55;
       });
     }, 60);
-
-    // Show slow message after 15s
     const slowTimer = setTimeout(() => setShowSlowMsg(true), 15000);
-
     return () => {
       clearTimeout(jumpTimer);
       clearTimeout(slowTimer);
@@ -276,9 +324,16 @@ function ScanningView() {
 interface RiskPanelProps {
   contractId: string;
   initialScan: ScanResult | null;
+  pageTexts?: string[];
+  onClauseClick?: (page: number) => void;
 }
 
-export function RiskPanel({ contractId, initialScan }: RiskPanelProps) {
+export function RiskPanel({
+  contractId,
+  initialScan,
+  pageTexts,
+  onClauseClick,
+}: RiskPanelProps) {
   const [state, dispatch] = useReducer(
     reducer,
     initialScan ? { status: "done", scan: initialScan } : { status: "idle" }
@@ -286,6 +341,13 @@ export function RiskPanel({ contractId, initialScan }: RiskPanelProps) {
 
   const [activeCategory, setActiveCategory] = useState<string>("all");
   const [activeSeverity, setActiveSeverity] = useState<string>("all");
+  const [activeClauseIndex, setActiveClauseIndex] = useState<number | null>(null);
+
+  // Reset severity + active clause when category changes
+  useEffect(() => {
+    setActiveSeverity("all");
+    setActiveClauseIndex(null);
+  }, [activeCategory]);
 
   async function startScan() {
     dispatch({ status: "scanning" });
@@ -396,21 +458,34 @@ export function RiskPanel({ contractId, initialScan }: RiskPanelProps) {
   const color = scoreColor(scan.risk_score);
   const grade = scoreGrade(scan.risk_score);
 
-  // Sort: high first, then medium, then low
-  const severityOrder = { high: 0, medium: 1, low: 2 };
-  const sorted = [...scan.clauses].sort(
-    (a, b) => (severityOrder[a.severity] ?? 3) - (severityOrder[b.severity] ?? 3)
+  // Category counts (across all clauses)
+  const categoryCounts = scan.clauses.reduce((acc, c) => {
+    acc[c.category] = (acc[c.category] ?? 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+
+  // Clauses matching the active category (before severity filter)
+  const categoryFiltered = scan.clauses.filter(
+    (c) => activeCategory === "all" || c.category === activeCategory
   );
 
-  // Apply filters
-  const filtered = sorted.filter((c) => {
-    const catMatch = activeCategory === "all" || c.category === activeCategory;
-    const sevMatch = activeSeverity === "all" || c.severity === activeSeverity;
-    return catMatch && sevMatch;
-  });
+  // Severity counts derived from the category-filtered set
+  const severityCounts: Record<string, number> = {
+    high: categoryFiltered.filter((c) => c.severity === "high").length,
+    medium: categoryFiltered.filter((c) => c.severity === "medium").length,
+    low: categoryFiltered.filter((c) => c.severity === "low").length,
+  };
 
-  const countBySeverity = (sev: string) =>
-    scan.clauses.filter((c) => c.severity === sev).length;
+  // Final list: both filters applied, sorted high → medium → low
+  const severityOrder = { high: 0, medium: 1, low: 2 };
+  const filtered = categoryFiltered
+    .filter((c) => activeSeverity === "all" || c.severity === activeSeverity)
+    .sort((a, b) => (severityOrder[a.severity] ?? 3) - (severityOrder[b.severity] ?? 3));
+
+  // Pre-compute target pages for all filtered clauses (avoids re-computing per render)
+  const targetPages = filtered.map((clause) =>
+    pageTexts && pageTexts.length > 0 ? findClausePage(clause.text, pageTexts) : null
+  );
 
   return (
     <div className="flex flex-col" style={{ gap: 14 }}>
@@ -465,7 +540,7 @@ export function RiskPanel({ contractId, initialScan }: RiskPanelProps) {
         {/* Category pills */}
         <div className="flex flex-wrap" style={{ gap: 5 }}>
           {CATEGORY_KEYS.map((cat) => {
-            const count = cat === "all" ? scan.clauses.length : scan.clauses.filter((c) => c.category === cat).length;
+            const count = cat === "all" ? scan.clauses.length : (categoryCounts[cat] ?? 0);
             if (cat !== "all" && count === 0) return null;
             const active = activeCategory === cat;
             return (
@@ -478,8 +553,9 @@ export function RiskPanel({ contractId, initialScan }: RiskPanelProps) {
                   borderRadius: 9999,
                   border: "none",
                   cursor: "pointer",
+                  transition: "all 0.15s",
                   background: active ? "#4f46e5" : "rgba(255,255,255,0.05)",
-                  color: active ? "white" : "rgba(255,255,255,0.4)",
+                  color: active ? "#ffffff" : "rgba(255,255,255,0.4)",
                   fontWeight: active ? 500 : 400,
                 }}
               >
@@ -489,13 +565,13 @@ export function RiskPanel({ contractId, initialScan }: RiskPanelProps) {
           })}
         </div>
 
-        {/* Severity pills */}
+        {/* Severity pills — counts based on category-filtered set */}
         <div className="flex flex-wrap" style={{ gap: 5 }}>
           {SEVERITY_KEYS.map((sev) => {
-            const count = sev === "all" ? scan.clauses.length : countBySeverity(sev);
+            const count = sev === "all" ? categoryFiltered.length : (severityCounts[sev] ?? 0);
             if (sev !== "all" && count === 0) return null;
             const active = activeSeverity === sev;
-            const sevCol = sev === "all" ? undefined : severityColor(sev);
+            const sevCol = sev === "all" ? null : severityColor(sev);
             return (
               <button
                 key={sev}
@@ -504,14 +580,17 @@ export function RiskPanel({ contractId, initialScan }: RiskPanelProps) {
                   fontSize: 11,
                   padding: "4px 10px",
                   borderRadius: 9999,
-                  border: "none",
                   cursor: "pointer",
+                  transition: "all 0.15s",
                   background: active
-                    ? sev === "all" ? "#4f46e5" : `${sevCol}25`
+                    ? sev === "all" ? "#4f46e5" : `${sevCol}33`
                     : "rgba(255,255,255,0.05)",
                   color: active
-                    ? sev === "all" ? "white" : sevCol
+                    ? sev === "all" ? "#ffffff" : sevCol!
                     : "rgba(255,255,255,0.4)",
+                  border: active && sev !== "all"
+                    ? `0.5px solid ${sevCol}66`
+                    : "none",
                   fontWeight: active ? 500 : 400,
                 }}
               >
@@ -522,14 +601,55 @@ export function RiskPanel({ contractId, initialScan }: RiskPanelProps) {
         </div>
       </div>
 
+      {/* Navigation hint — shown once page texts are loaded */}
+      {pageTexts && pageTexts.length > 0 && (
+        <p
+          style={{
+            fontSize: 11,
+            color: "rgba(255,255,255,0.25)",
+            fontStyle: "italic",
+            marginBottom: -6,
+          }}
+        >
+          Click any clause below to jump to it in the PDF
+        </p>
+      )}
+
       {/* Clause cards */}
       <div>
         {filtered.length === 0 ? (
-          <p style={{ fontSize: 13, color: "rgba(255,255,255,0.25)", textAlign: "center", padding: "2rem 0" }}>
-            No clauses in this category
-          </p>
+          <div style={{ textAlign: "center", padding: "2rem 1rem", color: "rgba(255,255,255,0.2)", fontSize: 13 }}>
+            No clauses match this filter combination.
+            <br />
+            <button
+              onClick={() => { setActiveCategory("all"); setActiveSeverity("all"); }}
+              style={{
+                marginTop: 8,
+                fontSize: 12,
+                color: "#818cf8",
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                textDecoration: "underline",
+              }}
+            >
+              Clear filters
+            </button>
+          </div>
         ) : (
-          filtered.map((clause, i) => <ClauseCard key={i} clause={clause} />)
+          filtered.map((clause, i) => (
+            <ClauseCard
+              key={i}
+              clause={clause}
+              isActive={activeClauseIndex === i}
+              targetPage={targetPages[i]}
+              onClick={() => {
+                setActiveClauseIndex(i);
+                const page = targetPages[i];
+                if (page !== null) onClauseClick?.(page);
+              }}
+            />
+          ))
         )}
       </div>
     </div>
