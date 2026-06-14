@@ -71,6 +71,20 @@ export async function POST(request: NextRequest) {
 
   console.log(`[scan] user ${user.id} scans_used=${userRecord?.scans_used} tier=${userRecord?.tier}`);
 
+  // Gate: free tier allows 1 scan only
+  if (
+    (userRecord?.tier === null || userRecord?.tier === "free") &&
+    (userRecord?.scans_used ?? 0) >= 1
+  ) {
+    return NextResponse.json(
+      {
+        error: "You have used your free scan. Upgrade to Pro for unlimited scans.",
+        code: "SCAN_LIMIT_REACHED",
+      },
+      { status: 403 }
+    );
+  }
+
   // No updated_at column — skip stale-scan check, just block concurrent scans
   if (contract.status === "scanning") {
     return NextResponse.json({ error: "Scan already in progress" }, { status: 409 });
@@ -183,12 +197,24 @@ Rules:
 CONTRACT TEXT TO ANALYSE:
 ${extractedText}`;
 
-  // Step 7 — Call Gemini with 30s timeout
+  // Step 7 — Call Gemini with env-aware timeout
+  const SCAN_TIMEOUT_MS = process.env.NODE_ENV === "production" ? 55000 : 30000;
+
   let rawResponse: string;
   let tokensUsed: number;
 
   try {
-    const { text, tokensUsed: tokens } = await callGemini(systemPrompt);
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => {
+        const err = new Error("Gemini timed out");
+        err.name = "AbortError";
+        reject(err);
+      }, SCAN_TIMEOUT_MS)
+    );
+    const { text, tokensUsed: tokens } = await Promise.race([
+      callGemini(systemPrompt),
+      timeoutPromise,
+    ]);
     rawResponse = text;
     tokensUsed = tokens;
   } catch (error) {
