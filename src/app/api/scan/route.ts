@@ -2,21 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { callGemini } from "@/lib/gemini";
+import { cleanContractText, buildScanPrompt, prefetchGeminiToken, type Clause } from "@/lib/scan-utils";
 import { PDFParse } from "pdf-parse";
 import { getPath as getPdfWorkerPath } from "pdf-parse/worker";
 
-// Set pdfjs worker path once at module load so the FakeWorker fallback
-// resolves to an actual file rather than the relative "./pdf.worker.mjs"
-// which would be missing in the compiled Next.js output directory.
 PDFParse.setWorker(getPdfWorkerPath());
-
-type Clause = {
-  text: string;
-  category: "payment_terms" | "liability" | "auto_renewal" | "IP" | "termination" | "other";
-  severity: "high" | "medium" | "low";
-  explanation: string;
-  rewrite: string;
-};
 
 type ScanResult = {
   id: string;
@@ -62,7 +52,7 @@ export async function POST(request: NextRequest) {
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
 
-  // Read scans_used + tier for logging now; gate enforcement is Day 5
+  // Read scans_used + tier for logging
   const { data: userRecord } = await adminSupabase
     .from("users")
     .select("scans_used, tier")
@@ -99,31 +89,38 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // Step 3 — Mark as scanning (before Gemini call so UI shows loading immediately)
+  // Step 3 — Mark as scanning
   await supabase
     .from("contracts")
     .update({ status: "scanning" })
     .eq("id", contractId);
 
-  // Step 4 — Generate signed URL and download PDF
+  // Step 4 — Parallel: PDF download + Gemini auth token
   const storagePath = contract.file_url.split("/storage/v1/object/public/contracts/")[1];
-  const { data: signedData } = await adminSupabase.storage
-    .from("contracts")
-    .createSignedUrl(storagePath, 60);
 
-  if (!signedData?.signedUrl) {
+  let pdfBuffer: ArrayBuffer;
+  let geminiToken: string;
+
+  try {
+    [pdfBuffer, geminiToken] = await Promise.all([
+      (async () => {
+        const { data: signedData } = await adminSupabase.storage
+          .from("contracts")
+          .createSignedUrl(storagePath, 60);
+        if (!signedData?.signedUrl) throw new Error("Could not generate signed URL");
+        const res = await fetch(signedData.signedUrl);
+        if (!res.ok) throw new Error("Could not download PDF");
+        return res.arrayBuffer();
+      })(),
+      prefetchGeminiToken(),
+    ]);
+  } catch (err) {
     await supabase.from("contracts").update({ status: "error" }).eq("id", contractId);
-    return NextResponse.json({ error: "Could not access contract file." }, { status: 500 });
+    const msg = err instanceof Error ? err.message : "Could not access contract file.";
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 
-  const pdfResponse = await fetch(signedData.signedUrl);
-  if (!pdfResponse.ok) {
-    await supabase.from("contracts").update({ status: "error" }).eq("id", contractId);
-    return NextResponse.json({ error: "Could not download contract file." }, { status: 500 });
-  }
-  const pdfBuffer = await pdfResponse.arrayBuffer();
-
-  // Step 5 — Extract text
+  // Step 5 — Extract and clean text
   let extractedText: string;
   try {
     const parser = new PDFParse({ data: Buffer.from(pdfBuffer) });
@@ -141,47 +138,18 @@ export async function POST(request: NextRequest) {
   if (extractedText.length < 50) {
     await supabase.from("contracts").update({ status: "error" }).eq("id", contractId);
     return NextResponse.json(
-      {
-        error:
-          "This PDF appears to be scanned or contains no readable text. Text extraction requires a text-based PDF.",
-      },
+      { error: "This PDF appears to be scanned or contains no readable text. Text extraction requires a text-based PDF." },
       { status: 422 }
     );
   }
 
-  if (extractedText.length > 40000) {
-    extractedText =
-      extractedText.slice(0, 40000) +
-      "\n\n[Note: Contract truncated to 40,000 characters for analysis]";
-  }
+  const cleanedText = cleanContractText(extractedText);
+  const finalText = cleanedText.length > 40000
+    ? cleanedText.slice(0, 40000) + "\n\n[Note: Contract truncated to 40,000 characters for analysis]"
+    : cleanedText;
 
   // Step 6 — Build Gemini prompt
-  const systemPrompt = `You are an expert contract lawyer reviewing a business contract for an SMB owner.
-Analyse the full contract text provided.
-
-Return ONLY a valid JSON object with exactly these top-level keys:
-
-{
-  "summary": "2-3 sentence plain-English overview of the contract's overall risk level and the single most important issue the user should know about.",
-  "risk_score": <integer 0-100, where 0=no risk, 100=extremely high risk>,
-  "clauses": [
-    {
-      "text": "exact quoted sentence from the contract",
-      "category": "payment_terms|liability|auto_renewal|IP|termination|other",
-      "severity": "high|medium|low",
-      "explanation": "plain-English explanation of the risk (max 2 sentences)",
-      "rewrite": "a safer alternative clause (1 sentence)"
-    }
-  ]
-}
-
-Rules:
-- Return NO preamble, NO markdown fences, ONLY the raw JSON object.
-- risk_score must reflect overall severity: mostly high clauses = 70-100, mostly medium = 30-69, mostly low or clean = 0-29.
-- If the document is not a contract, return risk_score: 0, an explanatory summary, and an empty clauses array.
-
-CONTRACT TEXT TO ANALYSE:
-${extractedText}`;
+  const systemPrompt = buildScanPrompt(finalText);
 
   // Step 7 — Call Gemini with env-aware timeout
   const SCAN_TIMEOUT_MS = process.env.NODE_ENV === "production" ? 55000 : 30000;
@@ -198,7 +166,7 @@ ${extractedText}`;
       }, SCAN_TIMEOUT_MS)
     );
     const { text, tokensUsed: tokens } = await Promise.race([
-      callGemini(systemPrompt),
+      callGemini(systemPrompt, geminiToken),
       timeoutPromise,
     ]);
     rawResponse = text;
@@ -207,7 +175,6 @@ ${extractedText}`;
     await supabase.from("contracts").update({ status: "error" }).eq("id", contractId);
 
     const err = error as Error;
-    // 429 quota exceeded — reset to pending so user can retry
     if (err.message.includes("429")) {
       await supabase.from("contracts").update({ status: "pending" }).eq("id", contractId);
       return NextResponse.json(
@@ -252,13 +219,13 @@ ${extractedText}`;
     );
   }
 
-  // Score derived entirely from clause severities — deterministic, not from LLM's self-report
+  // Deterministic score from clause severities
   const high = parsed.clauses.filter((c) => c.severity === "high").length;
   const medium = parsed.clauses.filter((c) => c.severity === "medium").length;
   const low = parsed.clauses.filter((c) => c.severity === "low").length;
   const finalScore = Math.min(100, high * 20 + medium * 8 + low * 2);
 
-  // Step 9 — Persist to scans table (admin client bypasses RLS — scans has no user_id column)
+  // Step 9 — Persist to scans table (admin client bypasses RLS)
   const { data: scan, error: scanError } = await adminSupabase
     .from("scans")
     .insert({
@@ -284,7 +251,7 @@ ${extractedText}`;
     .update({ status: "complete" })
     .eq("id", contractId);
 
-  // Step 10b — Increment scans_used (read-then-write; no RPC needed)
+  // Step 10b — Increment scans_used
   const { data: freshUser } = await adminSupabase
     .from("users")
     .select("scans_used")
