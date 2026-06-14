@@ -17,17 +17,18 @@ function SubmitButton({ label, formAction }: { label: string; formAction: (fd: F
       disabled={pending}
       className="relative w-full overflow-hidden hover:bg-[#4338ca] transition-colors"
       style={{
-        background: "#4f46e5",
-        borderRadius: 10,
-        padding: "11px",
-        fontSize: 13.5,
-        fontWeight: 500,
+        background: "linear-gradient(135deg, #5b4fff, #7c3aed)",
+        borderRadius: 12,
+        height: 50,
+        padding: "0 16px",
+        fontSize: 14,
+        fontWeight: 600,
         color: "white",
         letterSpacing: "-0.01em",
         border: "none",
         cursor: pending ? "not-allowed" : "pointer",
         opacity: pending ? 0.8 : 1,
-        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), 0 4px 16px rgba(79,70,229,0.35)",
+        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), 0 4px 20px rgba(91,79,255,0.4)",
         marginTop: "1rem",
         display: "flex",
         alignItems: "center",
@@ -45,7 +46,7 @@ function SubmitButton({ label, formAction }: { label: string; formAction: (fd: F
 }
 
 const pageStyle: React.CSSProperties = {
-  background: "#07070d",
+  background: "linear-gradient(135deg, #0d0a2e 0%, #060609 50%, #0a0d1a 100%)",
   minHeight: "100vh",
   position: "relative",
   overflow: "hidden",
@@ -67,7 +68,7 @@ const cardStyle: React.CSSProperties = {
   background: "rgba(255,255,255,0.025)",
   border: "0.5px solid rgba(255,255,255,0.07)",
   borderRadius: 20,
-  padding: "2rem",
+  padding: "32px",
   backdropFilter: "blur(20px)",
   boxShadow:
     "0 0 0 1px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.05)",
@@ -89,11 +90,12 @@ const shimmerStyle: React.CSSProperties = {
 function inputStyle(focused: boolean): React.CSSProperties {
   return {
     width: "100%",
-    background: focused ? "rgba(99,102,241,0.05)" : "rgba(255,255,255,0.04)",
-    border: `0.5px solid ${focused ? "rgba(99,102,241,0.5)" : "rgba(255,255,255,0.08)"}`,
-    boxShadow: focused ? "0 0 0 3px rgba(99,102,241,0.08)" : "none",
+    height: 44,
+    background: focused ? "rgba(91,79,255,0.05)" : "rgba(255,255,255,0.04)",
+    border: `0.5px solid ${focused ? "rgba(91,79,255,0.5)" : "rgba(255,255,255,0.08)"}`,
+    boxShadow: focused ? "0 0 0 3px rgba(91,79,255,0.08)" : "none",
     borderRadius: 10,
-    padding: "10px 13px",
+    padding: "0 13px",
     fontSize: 13.5,
     color: "rgba(255,255,255,0.7)",
     outline: "none",
@@ -122,12 +124,12 @@ export function LoginForm() {
       <div
         style={{
           position: "absolute",
-          width: 400,
-          height: 300,
-          top: -80,
-          left: -80,
-          background: "rgba(79,70,229,0.12)",
-          filter: "blur(80px)",
+          width: 600,
+          height: 600,
+          top: -160,
+          left: -160,
+          background: "rgba(91,79,255,0.12)",
+          filter: "blur(100px)",
           borderRadius: 9999,
           pointerEvents: "none",
         }}
@@ -136,12 +138,12 @@ export function LoginForm() {
       <div
         style={{
           position: "absolute",
-          width: 300,
-          height: 300,
-          bottom: -60,
-          right: -40,
+          width: 400,
+          height: 400,
+          bottom: -100,
+          right: -80,
           background: "rgba(124,58,237,0.08)",
-          filter: "blur(80px)",
+          filter: "blur(100px)",
           borderRadius: 9999,
           pointerEvents: "none",
         }}
@@ -168,7 +170,7 @@ export function LoginForm() {
             </p>
 
             {/* Title */}
-            <h1 style={{ fontSize: 22, fontWeight: 500, color: "#ffffff", letterSpacing: "-0.03em", lineHeight: 1.2, marginBottom: 4 }}>
+            <h1 style={{ fontSize: 24, fontWeight: 600, color: "#ffffff", letterSpacing: "-0.03em", lineHeight: 1.2, marginBottom: 4 }}>
               Welcome back
             </h1>
 
