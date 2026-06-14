@@ -31,6 +31,8 @@ type ScanResult = {
 interface ContractViewerProps {
   pdfUrl: string;
   contractId: string;
+  contractTitle: string;
+  userEmail: string;
   initialScan: ScanResult | null;
   initiallyScanning?: boolean;
 }
@@ -44,6 +46,8 @@ function scoreBadgeColor(score: number) {
 export default function ContractViewer({
   pdfUrl,
   contractId,
+  contractTitle,
+  userEmail,
   initialScan,
   initiallyScanning,
 }: ContractViewerProps) {
@@ -123,6 +127,8 @@ export default function ContractViewer({
             <div style={{ padding: "1.5rem" }}>
               <RiskPanel
                 contractId={contractId}
+                contractTitle={contractTitle}
+                userEmail={userEmail}
                 initialScan={initialScan}
                 initiallyScanning={initiallyScanning}
                 pageTexts={pageTexts}
@@ -190,6 +196,8 @@ export default function ContractViewer({
       >
         <RiskPanel
           contractId={contractId}
+          contractTitle={contractTitle}
+          userEmail={userEmail}
           initialScan={initialScan}
           initiallyScanning={initiallyScanning}
           pageTexts={pageTexts}

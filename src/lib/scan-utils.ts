@@ -8,6 +8,15 @@ export type Clause = {
   rewrite: string;
 };
 
+export type ScanResult = {
+  id: string;
+  risk_score: number;
+  summary: string;
+  clauses: Clause[];
+  tokens_used: number;
+  scanned_at: string;
+};
+
 export function cleanContractText(raw: string): string {
   return raw
     .replace(/\n{3,}/g, "\n\n")

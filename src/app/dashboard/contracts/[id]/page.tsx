@@ -180,6 +180,8 @@ export default async function ContractPage({ params }: PageProps) {
         <ContractViewer
           pdfUrl={pdfUrl}
           contractId={contract.id}
+          contractTitle={contract.title}
+          userEmail={user.email ?? ""}
           initialScan={initialScan}
           initiallyScanning={contract.status === "scanning"}
         />
