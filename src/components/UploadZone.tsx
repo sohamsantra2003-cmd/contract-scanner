@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { FilePlus, Upload, Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import { uploadContract } from "@/app/actions/contracts";
 
 type UploadState = "idle" | "uploading" | "error";
@@ -66,6 +67,9 @@ export function UploadZone() {
       }
 
       setProgress(100);
+      toast.success("Contract uploaded", {
+        description: "Your contract is ready to analyse.",
+      });
       router.push(`/dashboard/contracts/${result.data!.id}`);
     } catch {
       clearInterval(interval);
