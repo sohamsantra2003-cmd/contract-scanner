@@ -512,11 +512,32 @@ export function RiskPanel({
     setScanStatusMessage("Connecting to Gemini...");
     setStreamingText("");
     setChunkProgress(null);
-    await fetch("/api/contracts/reset-status", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ contractId }),
-    });
+
+    try {
+      const resetRes = await fetch("/api/contracts/reset-status", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contractId }),
+      });
+
+      if (!resetRes.ok) {
+        const resetData = await resetRes.json();
+        // 409 means a scan is already running — just show scanning state
+        if (resetRes.status === 409) {
+          dispatch({ status: "scanning" });
+          return;
+        }
+        dispatch({ status: "error", message: resetData.error ?? "Failed to reset contract. Please try again." });
+        return;
+      }
+    } catch {
+      dispatch({ status: "error", message: "Network error. Please try again." });
+      return;
+    }
+
+    // Small delay to ensure the DB write has propagated before scan-stream reads status
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
     dispatch({ status: "scanning" });
     await runScan();
   }

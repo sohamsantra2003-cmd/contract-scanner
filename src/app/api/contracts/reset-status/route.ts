@@ -3,29 +3,50 @@ import { createClient } from "@/lib/supabase/server";
 
 export async function POST(req: NextRequest) {
   const supabase = await createClient();
-  const { data: { user } } = await supabase.auth.getUser();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
   if (!user) {
     return NextResponse.json({ error: "Unauthorised" }, { status: 401 });
   }
 
-  const { contractId } = await req.json();
+  const body = await req.json();
+  const { contractId } = body;
 
-  // Ownership check
-  const { data: contract } = await supabase
+  if (!contractId) {
+    return NextResponse.json({ error: "contractId is required" }, { status: 400 });
+  }
+
+  // Ownership check — user can only reset their own contracts
+  const { data: contract, error: fetchError } = await supabase
     .from("contracts")
-    .select("id")
+    .select("id, title, status")
     .eq("id", contractId)
     .eq("user_id", user.id)
     .single();
 
-  if (!contract) {
-    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  if (fetchError || !contract) {
+    return NextResponse.json({ error: "Contract not found" }, { status: 404 });
   }
 
-  await supabase
+  // If already scanning, do not reset — return 409
+  if (contract.status === "scanning") {
+    return NextResponse.json({ error: "Scan already in progress" }, { status: 409 });
+  }
+
+  const { error: updateError } = await supabase
     .from("contracts")
     .update({ status: "pending" })
-    .eq("id", contractId);
+    .eq("id", contractId)
+    .eq("user_id", user.id);
 
-  return NextResponse.json({ success: true });
+  if (updateError) {
+    return NextResponse.json(
+      { error: "Failed to reset contract status" },
+      { status: 500 }
+    );
+  }
+
+  return NextResponse.json({ success: true, contractId: contract.id });
 }

@@ -69,6 +69,9 @@ export async function POST(req: NextRequest) {
     return encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   }
 
+  // Declared outside try so the outer catch can reset status on unexpected errors
+  let contractId = "";
+
   const stream = new ReadableStream({
     async start(controller) {
       try {
@@ -82,7 +85,6 @@ export async function POST(req: NextRequest) {
           process.env.SUPABASE_SERVICE_ROLE_KEY!
         );
 
-        let contractId: string;
         try {
           const body = await req.json();
           contractId = body.contractId;
@@ -96,9 +98,24 @@ export async function POST(req: NextRequest) {
           .from("contracts").select("*").eq("id", contractId).eq("user_id", user.id).single();
         if (!contract) { controller.enqueue(sseEvent("error", { message: "Contract not found" })); controller.close(); return; }
 
-        if (contract.status === "scanning") {
-          controller.enqueue(sseEvent("error", { message: "Scan already in progress" }));
+        // ── Stale scan recovery ──────────────────────────────────────────────
+        // If status is 'scanning' but updated_at is >3 min old, the previous
+        // scan crashed and left it stuck — reset and allow re-scan.
+        const now = new Date();
+        const contractAge = contract.updated_at ?? contract.created_at;
+        const minutesSinceUpdate = contractAge
+          ? (now.getTime() - new Date(contractAge).getTime()) / 60000
+          : 999;
+        const isStaleScanning = contract.status === "scanning" && minutesSinceUpdate > 3;
+
+        if (contract.status === "scanning" && !isStaleScanning) {
+          controller.enqueue(sseEvent("error", { message: "A scan is already in progress for this contract." }));
           controller.close(); return;
+        }
+
+        if (isStaleScanning) {
+          debug(`[scan-stream] stale scan detected (${Math.round(minutesSinceUpdate)}min), resetting`);
+          await supabase.from("contracts").update({ status: "pending" }).eq("id", contractId);
         }
 
         await supabase.from("contracts").update({ status: "scanning" }).eq("id", contractId);
@@ -121,12 +138,13 @@ export async function POST(req: NextRequest) {
             prefetchGeminiToken(),
           ]);
         } catch (err) {
-          await supabase.from("contracts").update({ status: "error" }).eq("id", contractId);
+          // Recoverable — user can retry
+          await supabase.from("contracts").update({ status: "pending" }).eq("id", contractId);
           controller.enqueue(sseEvent("error", { message: err instanceof Error ? err.message : "Could not access contract file." }));
           controller.close(); return;
         }
 
-        // ── PDF extraction (Fix C + D) ───────────────────────────────────────
+        // ── PDF extraction ───────────────────────────────────────────────────
         let rawText: string;
         let numpages: number;
         try {
@@ -135,9 +153,10 @@ export async function POST(req: NextRequest) {
           rawText = pdfData.text?.trim() ?? "";
           numpages = pdfData.numpages ?? 1;
         } catch (pdfErr) {
-          await supabase.from("contracts").update({ status: "error" }).eq("id", contractId);
           const errMsg = pdfErr instanceof Error ? pdfErr.message.toLowerCase() : String(pdfErr).toLowerCase();
           const isEncrypted = errMsg.includes("password") || errMsg.includes("encrypt") || errMsg.includes("protect") || errMsg.includes("decrypt");
+          // Unrecoverable — file itself is the problem
+          await supabase.from("contracts").update({ status: "error" }).eq("id", contractId);
           controller.enqueue(sseEvent("error", {
             message: isEncrypted ? "PASSWORD_PROTECTED" : "PDF_PARSE_ERROR",
             detail: isEncrypted
@@ -147,6 +166,7 @@ export async function POST(req: NextRequest) {
           controller.close(); return;
         }
 
+        // Unrecoverable — no text layer
         const charsPerPage = rawText.length / numpages;
         if (rawText.length < 50 || (charsPerPage < 40 && numpages > 1)) {
           await supabase.from("contracts").update({ status: "error" }).eq("id", contractId);
@@ -212,8 +232,9 @@ export async function POST(req: NextRequest) {
             } catch (e) {
               console.error(`[scan-stream] single-pass parse failed attempt ${attempt + 1}: ${e}`);
               if (attempt >= 1) {
-                await supabase.from("contracts").update({ status: "error" }).eq("id", contractId);
-                controller.enqueue(sseEvent("error", { message: "AI returned an unreadable response after 2 attempts." }));
+                // Recoverable — Gemini returned garbled JSON, user can retry
+                await supabase.from("contracts").update({ status: "pending" }).eq("id", contractId);
+                controller.enqueue(sseEvent("error", { message: "AI returned an unreadable response after 2 attempts. Please try again." }));
                 controller.close(); return;
               }
             }
@@ -224,7 +245,6 @@ export async function POST(req: NextRequest) {
         else if (mode === "two-pass") {
           controller.enqueue(sseEvent("status", { message: "Extracting clauses from contract..." }));
 
-          // Pass 1: stream clause extraction
           let clauses: Clause[] = [];
           for (let attempt = 0; attempt < 2; attempt++) {
             const prompt = attempt === 0
@@ -274,7 +294,6 @@ export async function POST(req: NextRequest) {
             message: `Found ${clauses.length} risk areas. Generating summary...`,
           }));
 
-          // Pass 2: synthesis (fast, non-streaming)
           let summaryData = { summary: "", risk_score: 0 };
           try {
             const { text: rawSum } = await callGemini(buildSynthesisPrompt(clauses), geminiToken, 1024);
@@ -293,7 +312,7 @@ export async function POST(req: NextRequest) {
           parsedResult = { summary: summaryData.summary, risk_score: summaryData.risk_score, clauses };
         }
 
-        // ── CHUNKED (Phase 2) ────────────────────────────────────────────────
+        // ── CHUNKED ──────────────────────────────────────────────────────────
         else {
           const chunks = chunkDocument(finalText, 10000, 500);
           const totalChunks = chunks.length;
@@ -365,8 +384,9 @@ export async function POST(req: NextRequest) {
 
         // ── Safety net ───────────────────────────────────────────────────────
         if (!parsedResult || typeof parsedResult.risk_score !== "number" || !Array.isArray(parsedResult.clauses)) {
-          await supabase.from("contracts").update({ status: "error" }).eq("id", contractId);
-          controller.enqueue(sseEvent("error", { message: "AI returned an unreadable response." }));
+          // Recoverable — user can retry
+          await supabase.from("contracts").update({ status: "pending" }).eq("id", contractId);
+          controller.enqueue(sseEvent("error", { message: "AI returned an unreadable response. Please try again." }));
           controller.close(); return;
         }
 
@@ -405,7 +425,14 @@ export async function POST(req: NextRequest) {
 
       } catch (err) {
         console.error("[scan-stream] unhandled error:", err);
-        controller.enqueue(sseEvent("error", { message: "An unexpected error occurred." }));
+        // Best-effort reset so the user can retry rather than being stuck
+        if (contractId) {
+          try {
+            const s = await createClient();
+            await s.from("contracts").update({ status: "pending" }).eq("id", contractId);
+          } catch { /* best effort */ }
+        }
+        controller.enqueue(sseEvent("error", { message: "An unexpected error occurred. Please try again." }));
         controller.close();
       }
     },
