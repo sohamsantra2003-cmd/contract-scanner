@@ -278,10 +278,16 @@ function ClauseCard({ clause, isActive, targetPage, onClick }: ClauseCardProps) 
   );
 }
 
-function ScanningView() {
+interface ScanningViewProps {
+  statusMessage: string;
+  streamingText: string;
+}
+
+function ScanningView({ statusMessage, streamingText }: ScanningViewProps) {
   const [progress, setProgress] = useState(0);
   const [showSlowMsg, setShowSlowMsg] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const streamingTextRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const jumpTimer = setTimeout(() => setProgress(30), 300);
@@ -302,10 +308,17 @@ function ScanningView() {
     };
   }, []);
 
+  // Auto-scroll streaming text to bottom
+  useEffect(() => {
+    if (streamingTextRef.current) {
+      streamingTextRef.current.scrollTop = streamingTextRef.current.scrollHeight;
+    }
+  }, [streamingText]);
+
   return (
-    <div className="flex flex-col items-center" style={{ padding: "2rem 1rem", gap: 16 }}>
-      <p style={{ fontSize: 14, color: "rgba(255,255,255,0.4)", letterSpacing: "-0.01em" }}>
-        Analysing contract…
+    <div className="flex flex-col" style={{ padding: "2rem 1rem", gap: 16 }}>
+      <p style={{ fontSize: 14, color: "rgba(255,255,255,0.4)", letterSpacing: "-0.01em", textAlign: "center" }}>
+        {statusMessage}
       </p>
       <div style={{ width: "100%", height: 3, background: "rgba(255,255,255,0.06)", borderRadius: 9999 }}>
         <div
@@ -317,6 +330,37 @@ function ScanningView() {
         <p style={{ fontSize: 12, color: "rgba(255,255,255,0.25)", textAlign: "center" }}>
           Still working — this contract may be complex…
         </p>
+      )}
+      {streamingText.length > 0 && (
+        <div>
+          <p style={{
+            fontSize: 10,
+            fontWeight: 500,
+            letterSpacing: "0.08em",
+            textTransform: "uppercase",
+            color: "#818cf8",
+            marginBottom: 6,
+          }}>
+            Gemini is thinking...
+          </p>
+          <div
+            ref={streamingTextRef}
+            style={{
+              background: "rgba(0,0,0,0.3)",
+              border: "0.5px solid rgba(255,255,255,0.06)",
+              borderRadius: 10,
+              padding: "12px 14px",
+              fontFamily: "'Courier New', monospace",
+              fontSize: 11,
+              color: "rgba(255,255,255,0.35)",
+              maxHeight: 180,
+              overflowY: "auto",
+              wordBreak: "break-all",
+            }}
+          >
+            {streamingText}
+          </div>
+        </div>
       )}
     </div>
   );
@@ -371,6 +415,8 @@ export function RiskPanel({
   const [activeSeverity, setActiveSeverity] = useState<string>("all");
   const [activeClauseIndex, setActiveClauseIndex] = useState<number | null>(null);
   const [displayScore, setDisplayScore] = useState(0);
+  const [scanStatusMessage, setScanStatusMessage] = useState("Connecting to Gemini...");
+  const [streamingText, setStreamingText] = useState("");
 
   // Reset severity + active clause when category changes
   useEffect(() => {
@@ -402,31 +448,87 @@ export function RiskPanel({
 
   async function startScan() {
     dispatch({ status: "scanning" });
+    setScanStatusMessage("Connecting to Gemini...");
+    setStreamingText("");
+
+    // Client-side timeout: 60s with no complete/error event → error state
+    let settled = false;
+    const clientTimeout = setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        dispatch({ status: "error", message: "Analysis timed out. Please try again." });
+        toast.error("Analysis failed", { description: "Analysis timed out. Please try again." });
+      }
+    }, 60000);
+
     try {
-      const res = await fetch("/api/scan", {
+      const response = await fetch("/api/scan-stream", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ contractId }),
       });
-      const data = await res.json();
 
-      if (!res.ok) {
-        toast.error("Analysis failed", {
-          description: data.error ?? "Please try again.",
-        });
-        dispatch({ status: "error", message: data.error ?? "Scan failed" });
-        return;
+      if (!response.ok || !response.body) {
+        throw new Error("Stream connection failed");
       }
 
-      dispatch({ status: "done", scan: data.scan });
-      toast.success("Analysis complete", {
-        description: `Risk score: ${data.scan.risk_score}/100`,
-      });
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        let currentEvent = "";
+        for (const line of lines) {
+          if (line.startsWith("event: ")) {
+            currentEvent = line.slice(7).trim();
+          } else if (line.startsWith("data: ")) {
+            const jsonStr = line.slice(6).trim();
+            if (!jsonStr) continue;
+            try {
+              const payload = JSON.parse(jsonStr);
+              switch (currentEvent) {
+                case "status":
+                  setScanStatusMessage(payload.message);
+                  break;
+                case "chunk":
+                  setStreamingText((prev) => prev + payload.text);
+                  break;
+                case "complete":
+                  settled = true;
+                  clearTimeout(clientTimeout);
+                  dispatch({ status: "done", scan: payload.scan });
+                  toast.success("Analysis complete", {
+                    description: `Risk score: ${payload.scan.risk_score}/100`,
+                  });
+                  break;
+                case "error":
+                  settled = true;
+                  clearTimeout(clientTimeout);
+                  dispatch({ status: "error", message: payload.message });
+                  toast.error("Analysis failed", { description: payload.message });
+                  break;
+              }
+              currentEvent = "";
+            } catch {
+              // Malformed SSE line — skip
+            }
+          }
+        }
+      }
     } catch {
-      toast.error("Analysis failed", {
-        description: "Network error. Please try again.",
-      });
-      dispatch({ status: "error", message: "Network error. Please try again." });
+      if (!settled) {
+        settled = true;
+        clearTimeout(clientTimeout);
+        dispatch({ status: "error", message: "Connection lost. Please try again." });
+        toast.error("Analysis failed", { description: "Connection lost. Please try again." });
+      }
     }
   }
 
@@ -477,7 +579,7 @@ export function RiskPanel({
 
   // ── Scanning ──
   if (state.status === "scanning") {
-    return <ScanningView />;
+    return <ScanningView statusMessage={scanStatusMessage} streamingText={streamingText} />;
   }
 
   // ── Error ──
