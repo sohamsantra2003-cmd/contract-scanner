@@ -18,16 +18,14 @@ async function getToken(prefetchedToken?: string): Promise<string> {
   return token;
 }
 
-const GENERATION_CONFIG = {
-  temperature: 0,
-  maxOutputTokens: 4096,
-  topP: 0.95,
-  topK: 20,
-};
+function generationConfig(outputTokens: number) {
+  return { temperature: 0, maxOutputTokens: outputTokens, topP: 0.95, topK: 20 };
+}
 
 export async function callGemini(
   prompt: string,
-  prefetchedToken?: string
+  prefetchedToken?: string,
+  outputTokens: number = 4096
 ): Promise<{ text: string; tokensUsed: number }> {
   const token = await getToken(prefetchedToken);
 
@@ -39,7 +37,7 @@ export async function callGemini(
     },
     body: JSON.stringify({
       contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: GENERATION_CONFIG,
+      generationConfig: generationConfig(outputTokens),
     }),
   });
 
@@ -58,7 +56,8 @@ export async function callGemini(
 
 export async function streamGemini(
   prompt: string,
-  prefetchedToken?: string
+  prefetchedToken?: string,
+  outputTokens: number = 4096
 ): Promise<ReadableStream<Uint8Array>> {
   const token = await getToken(prefetchedToken);
 
@@ -70,7 +69,7 @@ export async function streamGemini(
     },
     body: JSON.stringify({
       contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: GENERATION_CONFIG,
+      generationConfig: generationConfig(outputTokens),
     }),
   });
 

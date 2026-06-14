@@ -1,7 +1,7 @@
 "use client";
 
 import { useReducer, useState, useEffect, useRef } from "react";
-import { ShieldCheck, Copy, Check, Download, RefreshCw } from "lucide-react";
+import { ShieldCheck, Copy, Check, Download, RefreshCw, ScanLine, Lock, FileWarning, Clock } from "lucide-react";
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { exportScanReport } from "@/lib/export-pdf";
@@ -237,9 +237,10 @@ function ClauseCard({ clause, isActive, targetPage, onClick }: ClauseCardProps) 
 interface ScanningViewProps {
   statusMessage: string;
   streamingText: string;
+  chunkProgress: { completed: number; total: number } | null;
 }
 
-function ScanningView({ statusMessage, streamingText }: ScanningViewProps) {
+function ScanningView({ statusMessage, streamingText, chunkProgress }: ScanningViewProps) {
   const [progress, setProgress] = useState(0);
   const [showSlowMsg, setShowSlowMsg] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -278,11 +279,26 @@ function ScanningView({ statusMessage, streamingText }: ScanningViewProps) {
           style={{ width: `${progress}%`, height: 3, background: "#4f46e5", borderRadius: 9999 }}
         />
       </div>
-      {showSlowMsg && (
+      {chunkProgress ? (
+        <div style={{ marginTop: 4 }}>
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginBottom: 4, fontFamily: "monospace" }}>
+            {chunkProgress.completed} / {chunkProgress.total} sections
+          </div>
+          <div style={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
+            {Array.from({ length: chunkProgress.total }).map((_, i) => (
+              <div key={i} style={{
+                width: 12, height: 4, borderRadius: 2,
+                background: i < chunkProgress.completed ? "#4f46e5" : "rgba(255,255,255,0.08)",
+                transition: "background 0.2s",
+              }} />
+            ))}
+          </div>
+        </div>
+      ) : showSlowMsg ? (
         <p style={{ fontSize: 12, color: "rgba(255,255,255,0.25)", textAlign: "center" }}>
           Still working — this contract may be complex…
         </p>
-      )}
+      ) : null}
       {streamingText.length > 0 && (
         <div>
           <p style={{ fontSize: 10, fontWeight: 500, letterSpacing: "0.08em", textTransform: "uppercase", color: "#818cf8", marginBottom: 6 }}>
@@ -366,6 +382,7 @@ export function RiskPanel({
   const [displayScore, setDisplayScore] = useState(0);
   const [scanStatusMessage, setScanStatusMessage] = useState("Connecting to Gemini...");
   const [streamingText, setStreamingText] = useState("");
+  const [chunkProgress, setChunkProgress] = useState<{ completed: number; total: number } | null>(null);
 
   useEffect(() => {
     setActiveSeverity("all");
@@ -437,6 +454,10 @@ export function RiskPanel({
                 case "chunk":
                   setStreamingText((prev) => prev + payload.text);
                   break;
+                case "progress":
+                  setChunkProgress({ completed: payload.completed, total: payload.total });
+                  setScanStatusMessage(payload.message ?? `Analysed ${payload.completed} of ${payload.total} sections...`);
+                  break;
                 case "complete":
                   settled = true;
                   clearTimeout(clientTimeout);
@@ -483,12 +504,14 @@ export function RiskPanel({
     dispatch({ status: "scanning" });
     setScanStatusMessage("Connecting to Gemini...");
     setStreamingText("");
+    setChunkProgress(null);
     await runScan();
   }
 
   async function handleRescan() {
     setScanStatusMessage("Connecting to Gemini...");
     setStreamingText("");
+    setChunkProgress(null);
     await fetch("/api/contracts/reset-status", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -545,29 +568,94 @@ export function RiskPanel({
 
   // ── Scanning ──
   if (state.status === "scanning") {
-    return <ScanningView statusMessage={scanStatusMessage} streamingText={streamingText} />;
+    return <ScanningView statusMessage={scanStatusMessage} streamingText={streamingText} chunkProgress={chunkProgress} />;
   }
 
   // ── Error ──
   if (state.status === "error") {
-    const isComplexDocError =
-      state.message.includes("unreadable") ||
-      state.message.includes("too complex");
+    const msg = state.message;
+    const isScanned = msg.includes("SCANNED_PDF") || msg.includes("scanned images");
+    const isPassword = msg.includes("PASSWORD_PROTECTED") || msg.includes("password-protected");
+    const isComplex = msg.includes("unreadable") || msg.includes("too complex");
+    const isTimeout = msg.includes("timed out");
+
+    if (isScanned) {
+      return (
+        <div style={{ background: "rgba(251,191,36,0.06)", border: "0.5px solid rgba(251,191,36,0.25)", borderRadius: 12, padding: "1.25rem" }}>
+          <div className="flex items-center" style={{ gap: 8, marginBottom: 8 }}>
+            <ScanLine size={16} color="#fbbf24" />
+            <p style={{ fontSize: 13, fontWeight: 500, color: "#fbbf24", margin: 0 }}>Scanned PDF detected</p>
+          </div>
+          <p style={{ fontSize: 12.5, color: "rgba(255,200,100,0.7)", lineHeight: 1.6, marginBottom: 12, whiteSpace: "pre-line" }}>
+            {"This PDF contains scanned images rather than selectable text.\n\nTo fix this:\n• Adobe Acrobat → Tools → Enhance Scans → Recognize Text\n• Free OCR: "}
+            <a href="https://smallpdf.com/pdf-to-word" target="_blank" rel="noopener noreferrer" style={{ color: "#fbbf24" }}>smallpdf.com/pdf-to-word</a>
+            {"\n• Or export as PDF directly from Word / Google Docs"}
+          </p>
+          <button onClick={() => dispatch({ status: "idle" })} style={{ fontSize: 12, color: "#818cf8", background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline" }}>
+            Upload a different file
+          </button>
+        </div>
+      );
+    }
+
+    if (isPassword) {
+      return (
+        <div style={{ background: "rgba(251,191,36,0.06)", border: "0.5px solid rgba(251,191,36,0.25)", borderRadius: 12, padding: "1.25rem" }}>
+          <div className="flex items-center" style={{ gap: 8, marginBottom: 8 }}>
+            <Lock size={16} color="#fbbf24" />
+            <p style={{ fontSize: 13, fontWeight: 500, color: "#fbbf24", margin: 0 }}>Password-protected PDF</p>
+          </div>
+          <p style={{ fontSize: 12.5, color: "rgba(255,200,100,0.7)", lineHeight: 1.6, marginBottom: 12 }}>
+            {"To remove the password:\n• Adobe Acrobat: File → Properties → Security → Change to \"No Security\"\n• Online (free): "}
+            <a href="https://smallpdf.com/unlock-pdf" target="_blank" rel="noopener noreferrer" style={{ color: "#fbbf24" }}>smallpdf.com/unlock-pdf</a>
+            {"\n• Google Chrome: Open PDF → Print → Save as PDF"}
+          </p>
+          <button onClick={() => dispatch({ status: "idle" })} style={{ fontSize: 12, color: "#818cf8", background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline" }}>
+            Upload unlocked file
+          </button>
+        </div>
+      );
+    }
+
+    if (isComplex) {
+      return (
+        <div style={{ background: "rgba(99,102,241,0.06)", border: "0.5px solid rgba(99,102,241,0.25)", borderRadius: 12, padding: "1.25rem" }}>
+          <div className="flex items-center" style={{ gap: 8, marginBottom: 8 }}>
+            <FileWarning size={16} color="#818cf8" />
+            <p style={{ fontSize: 13, fontWeight: 500, color: "#818cf8", margin: 0 }}>Document too complex to parse</p>
+          </div>
+          <p style={{ fontSize: 12.5, color: "rgba(180,180,255,0.6)", lineHeight: 1.6, marginBottom: 12 }}>
+            Try uploading just the main agreement pages without annexes and form templates.
+          </p>
+          <button onClick={() => dispatch({ status: "idle" })} style={{ fontSize: 12, color: "#818cf8", background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline" }}>
+            Try again
+          </button>
+        </div>
+      );
+    }
+
+    if (isTimeout) {
+      return (
+        <div style={{ background: "rgba(251,146,60,0.06)", border: "0.5px solid rgba(251,146,60,0.25)", borderRadius: 12, padding: "1.25rem" }}>
+          <div className="flex items-center" style={{ gap: 8, marginBottom: 8 }}>
+            <Clock size={16} color="#fb923c" />
+            <p style={{ fontSize: 13, fontWeight: 500, color: "#fb923c", margin: 0 }}>Analysis timed out</p>
+          </div>
+          <p style={{ fontSize: 12.5, color: "rgba(255,180,120,0.7)", lineHeight: 1.6, marginBottom: 12 }}>
+            This contract is taking longer than expected. Please try again — Gemini processes faster on retry.
+          </p>
+          <button onClick={() => dispatch({ status: "idle" })} style={{ fontSize: 12, color: "#818cf8", background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline" }}>
+            Try again
+          </button>
+        </div>
+      );
+    }
 
     return (
       <div style={{ background: "rgba(239,68,68,0.08)", border: "0.5px solid rgba(239,68,68,0.25)", borderRadius: 12, padding: "1.25rem" }}>
         <p style={{ fontSize: 13, fontWeight: 500, color: "#f87171", marginBottom: 6 }}>Analysis failed</p>
-        <p style={{ fontSize: 12.5, color: "rgba(255,120,120,0.7)", lineHeight: 1.5, marginBottom: isComplexDocError ? 8 : 12 }}>{state.message}</p>
-        {isComplexDocError && (
-          <div style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", lineHeight: 1.6, marginBottom: 12 }}>
-            <strong style={{ color: "rgba(255,255,255,0.7)" }}>Tip:</strong>
-            {" "}This document contains annexes and form templates that make it harder to analyse. Try uploading just the main agreement (pages 1–15 typically) without the annexes for a cleaner result.
-          </div>
-        )}
-        <button
-          onClick={() => dispatch({ status: "idle" })}
-          style={{ fontSize: 12, color: "#818cf8", background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline" }}
-        >
+        <p style={{ fontSize: 12.5, color: "rgba(255,120,120,0.7)", lineHeight: 1.5, marginBottom: 12 }}>{state.message}</p>
+        <button onClick={() => dispatch({ status: "idle" })} style={{ fontSize: 12, color: "#818cf8", background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline" }}>
           Try again
         </button>
       </div>
