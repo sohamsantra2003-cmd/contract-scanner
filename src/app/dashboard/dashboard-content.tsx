@@ -167,7 +167,7 @@ export function DashboardContent({
 
           {/* Section header */}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-            <h2 style={{ fontSize: 20, fontWeight: 500, color: "#fff", letterSpacing: "-0.02em" }}>
+            <h2 style={{ fontSize: 28, fontWeight: 600, color: "#fff", letterSpacing: "-0.03em" }}>
               Your contracts
             </h2>
             <UploadTrigger
@@ -261,7 +261,7 @@ export function DashboardContent({
                 >
                   <Icon size={14} color="#818cf8" />
                 </div>
-                <p style={{ fontSize: 12, fontWeight: 500, color: "rgba(255,255,255,0.5)", lineHeight: 1.4 }}>
+                <p style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.5)", lineHeight: 1.4 }}>
                   {label}
                 </p>
               </div>

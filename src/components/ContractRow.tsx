@@ -100,7 +100,7 @@ export function ContractRow({ contract }: { contract: Contract }) {
         >
           {contract.title}
         </p>
-        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.35)" }}>
+        <p style={{ fontSize: 13, color: "rgba(255,255,255,0.35)" }}>
           {formatDistanceToNow(new Date(contract.created_at), { addSuffix: true })}
         </p>
       </div>
