@@ -3,10 +3,6 @@
 import { useReducer, useState, useEffect, useRef } from "react";
 import { ShieldCheck, Copy, Check } from "lucide-react";
 import { toast } from "sonner";
-import {
-  Dialog,
-  DialogContent,
-} from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -375,7 +371,6 @@ export function RiskPanel({
   const [activeSeverity, setActiveSeverity] = useState<string>("all");
   const [activeClauseIndex, setActiveClauseIndex] = useState<number | null>(null);
   const [displayScore, setDisplayScore] = useState(0);
-  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
 
   // Reset severity + active clause when category changes
   useEffect(() => {
@@ -415,15 +410,6 @@ export function RiskPanel({
       });
       const data = await res.json();
 
-      if (res.status === 403) {
-        setShowUpgradeModal(true);
-        toast.error("Scan limit reached", {
-          description: "Upgrade to Pro for unlimited scans.",
-        });
-        dispatch({ status: "idle" });
-        return;
-      }
-
       if (!res.ok) {
         toast.error("Analysis failed", {
           description: data.error ?? "Please try again.",
@@ -447,9 +433,8 @@ export function RiskPanel({
   // ── Idle ──
   if (state.status === "idle") {
     return (
-      <>
-        <div
-          className="flex flex-col items-center text-center"
+      <div
+        className="flex flex-col items-center text-center"
           style={{
             background: "rgba(255,255,255,0.025)",
             border: "0.5px solid rgba(255,255,255,0.07)",
@@ -486,9 +471,7 @@ export function RiskPanel({
           >
             Analyse contract
           </button>
-        </div>
-        <UpgradeModal open={showUpgradeModal} onClose={() => setShowUpgradeModal(false)} />
-      </>
+      </div>
     );
   }
 
@@ -739,138 +722,6 @@ export function RiskPanel({
           )}
         </div>
       </div>
-
-      <UpgradeModal open={showUpgradeModal} onClose={() => setShowUpgradeModal(false)} />
     </>
-  );
-}
-
-// ── Upgrade Modal ─────────────────────────────────────────────────────────────
-
-function UpgradeModal({ open, onClose }: { open: boolean; onClose: () => void }) {
-  return (
-    <Dialog open={open} onOpenChange={(isOpen) => { if (!isOpen) onClose(); }}>
-      <DialogContent
-        showCloseButton={false}
-        style={{
-          background: "#111118",
-          border: "0.5px solid rgba(255,255,255,0.08)",
-          borderRadius: 16,
-          maxWidth: 420,
-          padding: "24px",
-        }}
-      >
-        {/* Header */}
-        <div style={{ textAlign: "center", padding: "8px 0 16px" }}>
-          <div
-            style={{
-              width: 48,
-              height: 48,
-              borderRadius: 12,
-              background: "rgba(99,102,241,0.15)",
-              border: "0.5px solid rgba(99,102,241,0.3)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              margin: "0 auto 12px",
-            }}
-          >
-            <ShieldCheck size={24} color="#818cf8" />
-          </div>
-          <h2 style={{ fontSize: 18, fontWeight: 500, color: "#ffffff", letterSpacing: "-0.02em", margin: "0 0 6px" }}>
-            Upgrade to Pro
-          </h2>
-          <p style={{ fontSize: 13, color: "rgba(255,255,255,0.4)", lineHeight: 1.5, margin: 0 }}>
-            You have used your free scan. Upgrade to continue protecting your business contracts.
-          </p>
-        </div>
-
-        {/* Feature list */}
-        <div
-          style={{
-            background: "rgba(255,255,255,0.03)",
-            border: "0.5px solid rgba(255,255,255,0.06)",
-            borderRadius: 10,
-            padding: "14px 16px",
-            marginBottom: 16,
-          }}
-        >
-          {[
-            "Unlimited contract scans",
-            "Full clause-by-clause risk breakdown",
-            "Plain-English explanations + safer rewrites",
-            "PDF report export",
-            "Priority analysis speed",
-          ].map((feature) => (
-            <div
-              key={feature}
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-                marginBottom: 8,
-                fontSize: 13,
-                color: "rgba(255,255,255,0.6)",
-              }}
-            >
-              <Check size={13} color="#4ade80" />
-              {feature}
-            </div>
-          ))}
-
-          {/* Price */}
-          <div
-            style={{
-              marginTop: 12,
-              paddingTop: 12,
-              borderTop: "0.5px solid rgba(255,255,255,0.06)",
-              textAlign: "center",
-            }}
-          >
-            <span style={{ fontSize: 28, fontWeight: 500, color: "#ffffff" }}>₹999</span>
-            <span style={{ fontSize: 13, color: "rgba(255,255,255,0.3)", marginLeft: 4 }}>/month</span>
-          </div>
-        </div>
-
-        {/* CTA buttons */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <button
-            onClick={() => {
-              toast.info("Payment coming soon — check back tomorrow!");
-              onClose();
-            }}
-            style={{
-              width: "100%",
-              background: "#4f46e5",
-              border: "none",
-              borderRadius: 10,
-              padding: 12,
-              fontSize: 14,
-              fontWeight: 500,
-              color: "#ffffff",
-              cursor: "pointer",
-              boxShadow: "0 4px 14px rgba(79,70,229,0.35)",
-            }}
-          >
-            Upgrade to Pro — ₹999/mo
-          </button>
-          <button
-            onClick={onClose}
-            style={{
-              width: "100%",
-              background: "transparent",
-              border: "0.5px solid rgba(255,255,255,0.08)",
-              borderRadius: 10,
-              padding: 10,
-              fontSize: 13,
-              color: "rgba(255,255,255,0.3)",
-              cursor: "pointer",
-            }}
-          >
-            Maybe later
-          </button>
-        </div>
-      </DialogContent>
-    </Dialog>
   );
 }

@@ -71,20 +71,6 @@ export async function POST(request: NextRequest) {
 
   console.log(`[scan] user ${user.id} scans_used=${userRecord?.scans_used} tier=${userRecord?.tier}`);
 
-  // Gate: free tier allows 1 scan only
-  if (
-    (userRecord?.tier === null || userRecord?.tier === "free") &&
-    (userRecord?.scans_used ?? 0) >= 1
-  ) {
-    return NextResponse.json(
-      {
-        error: "You have used your free scan. Upgrade to Pro for unlimited scans.",
-        code: "SCAN_LIMIT_REACHED",
-      },
-      { status: 403 }
-    );
-  }
-
   // No updated_at column — skip stale-scan check, just block concurrent scans
   if (contract.status === "scanning") {
     return NextResponse.json({ error: "Scan already in progress" }, { status: 409 });
