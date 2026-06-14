@@ -1,0 +1,16 @@
+{
+  "framework": "nextjs",
+  "buildCommand": "pnpm build",
+  "installCommand": "pnpm install",
+  "functions": {
+    "src/app/api/scan/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/scan-stream/route.ts": {
+      "maxDuration": 60
+    },
+    "src/app/api/send-report/route.ts": {
+      "maxDuration": 30
+    }
+  }
+}
