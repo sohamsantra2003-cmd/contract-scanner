@@ -1,10 +1,12 @@
 import { createClient } from "@/lib/supabase/server";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { redirect } from "next/navigation";
+import { Suspense } from "react";
 import Link from "next/link";
 import { ChevronRight } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import ContractViewer from "@/components/ContractViewer";
+import { RiskPanelSkeleton } from "@/components/RiskPanel";
 
 interface PageProps {
   params: Promise<{ id: string }>;
@@ -174,11 +176,14 @@ export default async function ContractPage({ params }: PageProps) {
       </header>
 
       {/* ── Two-panel layout (client-owned state via ContractViewer) ── */}
-      <ContractViewer
-        pdfUrl={pdfUrl}
-        contractId={contract.id}
-        initialScan={initialScan}
-      />
+      <Suspense fallback={<RiskPanelSkeleton />}>
+        <ContractViewer
+          pdfUrl={pdfUrl}
+          contractId={contract.id}
+          initialScan={initialScan}
+          initiallyScanning={contract.status === "scanning"}
+        />
+      </Suspense>
     </div>
   );
 }
