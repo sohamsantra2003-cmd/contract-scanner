@@ -2,10 +2,47 @@
 
 import { useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { useFormStatus } from "react-dom";
 import Link from "next/link";
-import { Mail, Lock, Shield, Check } from "lucide-react";
+import { Mail, Lock, Shield, Check, Loader2 } from "lucide-react";
 import { Wordmark } from "@/components/wordmark";
 import { signUp, signInWithMagicLink } from "@/app/actions/auth";
+
+function SubmitButton({ label, formAction }: { label: string; formAction: (fd: FormData) => void | Promise<void> }) {
+  const { pending } = useFormStatus();
+  return (
+    <button
+      type="submit"
+      formAction={formAction}
+      disabled={pending}
+      className="relative w-full overflow-hidden hover:bg-[#4338ca] transition-colors"
+      style={{
+        background: "#4f46e5",
+        borderRadius: 10,
+        padding: "11px",
+        fontSize: 13.5,
+        fontWeight: 500,
+        color: "white",
+        letterSpacing: "-0.01em",
+        border: "none",
+        cursor: pending ? "not-allowed" : "pointer",
+        opacity: pending ? 0.8 : 1,
+        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), 0 4px 16px rgba(79,70,229,0.35)",
+        marginTop: "1rem",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 8,
+      }}
+    >
+      <span
+        className="absolute top-0 left-0 right-0 h-px pointer-events-none"
+        style={{ background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.15), transparent)" }}
+      />
+      {pending ? <Loader2 size={16} className="animate-spin" /> : label}
+    </button>
+  );
+}
 
 const pageStyle: React.CSSProperties = {
   background: "#07070d",
@@ -203,31 +240,7 @@ export function SignupForm() {
               </div>
 
               {/* Create account button */}
-              <button
-                type="submit"
-                formAction={signUp}
-                className="relative w-full overflow-hidden hover:bg-[#4338ca] transition-colors"
-                style={{
-                  background: "#4f46e5",
-                  borderRadius: 10,
-                  padding: "11px",
-                  fontSize: 13.5,
-                  fontWeight: 500,
-                  color: "white",
-                  letterSpacing: "-0.01em",
-                  border: "none",
-                  cursor: "pointer",
-                  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), 0 4px 16px rgba(79,70,229,0.35)",
-                  marginTop: "1rem",
-                  display: "block",
-                }}
-              >
-                <span
-                  className="absolute top-0 left-0 right-0 h-px pointer-events-none"
-                  style={{ background: "linear-gradient(90deg, transparent, rgba(255,255,255,0.15), transparent)" }}
-                />
-                Create account
-              </button>
+              <SubmitButton label="Create account" formAction={signUp} />
 
               {/* Separator */}
               <div className="flex items-center gap-3" style={{ margin: "1.25rem 0" }}>
