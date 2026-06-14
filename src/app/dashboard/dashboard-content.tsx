@@ -2,21 +2,7 @@
 
 import { useRef } from "react";
 import { useRouter } from "next/navigation";
-import {
-  Search,
-  MessageSquare,
-  PenLine,
-  LogOut,
-  FilePlus,
-} from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { signOut } from "@/app/actions/auth";
+import { Search, MessageSquare, PenLine, Upload, Shield } from "lucide-react";
 import { UploadZone } from "@/components/UploadZone";
 import { ContractRow } from "@/components/ContractRow";
 
@@ -31,110 +17,39 @@ interface Contract {
 
 const featureCards = [
   { Icon: Search, label: "Risk detection" },
-  { Icon: MessageSquare, label: "Plain English explanations" },
+  { Icon: MessageSquare, label: "Plain English" },
   { Icon: PenLine, label: "Safer rewrites" },
 ];
 
+function scoreColor(score: number) {
+  if (score <= 29) return "#34c759";
+  if (score <= 69) return "#ff9500";
+  return "#ff4d4d";
+}
 
-function Navbar({ email, initials }: { email: string; initials: string }) {
+function PillUploadButton({ onClick }: { onClick: () => void }) {
   return (
-    <header
-      className="sticky top-0 flex items-center justify-between z-50"
+    <button
+      onClick={onClick}
       style={{
-        height: 64,
-        background: "rgba(7,7,13,0.95)",
-        backdropFilter: "blur(12px)",
-        borderBottom: "0.5px solid rgba(255,255,255,0.06)",
-        padding: "0 2rem",
-        flexShrink: 0,
+        display: "inline-flex", alignItems: "center", gap: 8,
+        background: "linear-gradient(135deg, #5b4fff, #7c3aed)",
+        border: "none", borderRadius: 980,
+        padding: "10px 20px", fontSize: 14, fontWeight: 600,
+        color: "white", cursor: "pointer",
+        boxShadow: "0 4px 20px rgba(91,79,255,0.4), inset 0 1px 0 rgba(255,255,255,0.1)",
+        transition: "opacity 0.15s",
       }}
+      onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = "0.85"; }}
+      onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = "1"; }}
     >
-      <div className="flex items-center gap-2.5">
-        <div
-          style={{
-            width: 32,
-            height: 32,
-            borderRadius: 8,
-            background: "linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            flexShrink: 0,
-          }}
-        >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-            <polyline points="9 12 11 14 15 10"/>
-          </svg>
-        </div>
-        <span style={{ fontSize: 15, fontWeight: 500, color: "rgba(255,255,255,0.9)", letterSpacing: "-0.01em" }}>
-          Contract Scanner
-        </span>
-      </div>
-
-      <div className="flex items-center" style={{ gap: 12 }}>
-        <span
-          style={{
-            fontSize: 11,
-            fontWeight: 500,
-            letterSpacing: "0.04em",
-            background: "rgba(99,102,241,0.12)",
-            color: "#818cf8",
-            border: "0.5px solid rgba(99,102,241,0.25)",
-            borderRadius: 6,
-            padding: "4px 10px",
-          }}
-        >
-          Free plan
-        </span>
-
-        <span
-          className="hidden sm:block truncate"
-          style={{ fontSize: 13, color: "rgba(255,255,255,0.25)", maxWidth: 200, letterSpacing: "-0.01em" }}
-        >
-          {email}
-        </span>
-
-        <DropdownMenu>
-          <DropdownMenuTrigger style={{ all: "unset", cursor: "pointer" }}>
-            <div
-              className="flex items-center justify-center flex-shrink-0"
-              style={{
-                width: 34,
-                height: 34,
-                borderRadius: "50%",
-                background: "rgba(99,102,241,0.15)",
-                border: "1px solid rgba(99,102,241,0.35)",
-                fontSize: 11,
-                fontWeight: 500,
-                color: "#818cf8",
-                cursor: "pointer",
-              }}
-            >
-              {initials}
-            </div>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" style={{ minWidth: 200 }}>
-            <div style={{ padding: "6px 8px", fontSize: 12, color: "rgba(255,255,255,0.4)" }}>
-              {email}
-            </div>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              className="flex items-center gap-2 cursor-pointer"
-              style={{ fontSize: 14, color: "rgba(255,255,255,0.6)" }}
-              onClick={() => signOut()}
-            >
-              <LogOut size={14} />
-              Sign out
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-    </header>
+      <Upload size={15} />
+      Upload contract
+    </button>
   );
 }
 
-function CompactUploadZone() {
+function UploadTrigger({ label, style }: { label: string; style?: React.CSSProperties }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
 
@@ -143,31 +58,24 @@ function CompactUploadZone() {
     if (!file) return;
     if (file.type !== "application/pdf") return;
     if (file.size > 10 * 1024 * 1024) return;
-
     const { uploadContract } = await import("@/app/actions/contracts");
     const formData = new FormData();
     formData.append("file", file);
     const result = await uploadContract(formData);
-    if (result.data) {
-      router.push(`/dashboard/contracts/${result.data.id}`);
-    }
+    if (result.data) router.push(`/dashboard/contracts/${result.data.id}`);
   }
 
   return (
-    <div
-      className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity"
-      onClick={() => fileInputRef.current?.click()}
-      style={{
-        border: "1px dashed rgba(99,102,241,0.25)",
-        borderRadius: 12,
-        padding: "14px 20px",
-        background: "rgba(99,102,241,0.03)",
-      }}
-    >
-      <FilePlus size={18} color="#818cf8" style={{ flexShrink: 0 }} />
-      <span style={{ fontSize: 13, color: "rgba(255,255,255,0.35)" }}>
-        Upload another contract
-      </span>
+    <>
+      <button
+        onClick={() => fileInputRef.current?.click()}
+        style={style}
+        onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = "0.85"; }}
+        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = "1"; }}
+      >
+        <Upload size={15} />
+        {label}
+      </button>
       <input
         ref={fileInputRef}
         type="file"
@@ -175,13 +83,12 @@ function CompactUploadZone() {
         style={{ display: "none" }}
         onChange={handleFileChange}
       />
-    </div>
+    </>
   );
 }
 
 export function DashboardContent({
   email,
-  initials,
   contracts,
 }: {
   email: string;
@@ -190,104 +97,177 @@ export function DashboardContent({
 }) {
   const hasContracts = contracts.length > 0;
 
+  // Stat computations
+  const scoresAll = contracts.flatMap((c) => c.scans?.map((s) => s.risk_score) ?? []);
+  const avgScore = scoresAll.length > 0
+    ? Math.round(scoresAll.reduce((a, b) => a + b, 0) / scoresAll.length)
+    : null;
+
   return (
-    <div
-      className="min-h-screen flex flex-col"
-      style={{ background: "#07070d", position: "relative", overflow: "hidden" }}
-    >
-      {/* Grid texture */}
-      <div
-        style={{
-          position: "absolute",
-          inset: 0,
-          pointerEvents: "none",
-          backgroundImage:
-            "linear-gradient(rgba(79,70,229,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(79,70,229,0.03) 1px, transparent 1px)",
-          backgroundSize: "40px 40px",
-          zIndex: 0,
-        }}
-      />
-
-      {/* Glow orb */}
-      <div
-        style={{
-          position: "absolute",
-          width: 600,
-          height: 500,
-          top: 40,
-          left: "50%",
-          transform: "translateX(-50%)",
-          background: "rgba(79,70,229,0.09)",
-          filter: "blur(100px)",
-          borderRadius: "50%",
-          pointerEvents: "none",
-          zIndex: 0,
-        }}
-      />
-
-      <Navbar email={email} initials={initials} />
+    <div style={{ minHeight: "100vh", background: "#060609" }}>
 
       {hasContracts ? (
-        /* ── Populated state ── */
-        <main className="flex-1 relative z-10 px-4 py-8 mx-auto w-full" style={{ maxWidth: 760 }}>
+        <div style={{ padding: "40px 40px 40px 40px" }}>
+          {/* Page header */}
+          <div style={{ marginBottom: 32 }}>
+            <h1 style={{ fontSize: 32, fontWeight: 600, color: "#fff", letterSpacing: "-0.03em", marginBottom: 6 }}>
+              Dashboard
+            </h1>
+            <p style={{ fontSize: 14, color: "rgba(255,255,255,0.4)" }}>
+              Your contract risk overview
+            </p>
+          </div>
+
+          {/* Stat cards */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 32 }}>
+            {/* Total contracts */}
+            <div
+              className="glass-card"
+              style={{ height: 120, padding: 24, display: "flex", flexDirection: "column", justifyContent: "space-between" }}
+            >
+              <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(91,79,255,0.9)" }}>
+                Total Contracts
+              </span>
+              <span style={{ fontSize: 48, fontWeight: 700, letterSpacing: "-0.04em", color: "#fff", lineHeight: 1 }}>
+                {contracts.length}
+              </span>
+            </div>
+
+            {/* Average risk score */}
+            <div
+              className="glass-card"
+              style={{ height: 120, padding: 24, display: "flex", flexDirection: "column", justifyContent: "space-between" }}
+            >
+              <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(91,79,255,0.9)" }}>
+                Average Risk Score
+              </span>
+              <span
+                style={{
+                  fontSize: 48, fontWeight: 700, letterSpacing: "-0.04em", lineHeight: 1,
+                  color: avgScore !== null ? scoreColor(avgScore) : "rgba(255,255,255,0.3)",
+                }}
+              >
+                {avgScore !== null ? avgScore : "—"}
+              </span>
+            </div>
+
+            {/* High risk clauses */}
+            <div
+              className="glass-card"
+              style={{ height: 120, padding: 24, display: "flex", flexDirection: "column", justifyContent: "space-between" }}
+            >
+              <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(91,79,255,0.9)" }}>
+                High Risk Clauses
+              </span>
+              <span style={{ fontSize: 48, fontWeight: 700, letterSpacing: "-0.04em", color: "#ff4d4d", lineHeight: 1 }}>
+                —
+              </span>
+            </div>
+          </div>
+
           {/* Section header */}
-          <div className="flex items-center justify-between" style={{ marginBottom: "1.25rem" }}>
-            <h2 style={{ fontSize: 16, fontWeight: 500, color: "#ffffff", letterSpacing: "-0.01em" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+            <h2 style={{ fontSize: 20, fontWeight: 500, color: "#fff", letterSpacing: "-0.02em" }}>
               Your contracts
             </h2>
+            <UploadTrigger
+              label="Upload contract"
+              style={{
+                display: "inline-flex", alignItems: "center", gap: 8,
+                background: "linear-gradient(135deg, #5b4fff, #7c3aed)",
+                border: "none", borderRadius: 980,
+                padding: "10px 20px", fontSize: 14, fontWeight: 600,
+                color: "white", cursor: "pointer",
+                boxShadow: "0 4px 20px rgba(91,79,255,0.4), inset 0 1px 0 rgba(255,255,255,0.1)",
+                transition: "opacity 0.15s",
+              }}
+            />
           </div>
 
           {/* Contract rows */}
-          <div className="flex flex-col" style={{ gap: 8, marginBottom: "2rem" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {contracts.map((contract) => (
               <ContractRow key={contract.id} contract={contract} />
             ))}
           </div>
-
-          {/* Compact upload zone */}
-          <CompactUploadZone />
-        </main>
+        </div>
       ) : (
-        /* ── Empty state ── */
-        <>
-          <main className="flex-1 flex items-center justify-center relative z-10 px-4 py-12">
-            <UploadZone />
-          </main>
-          <div className="relative z-10 flex justify-center pb-12 px-4">
-            <div className="flex justify-center flex-wrap" style={{ gap: 12, maxWidth: 560 }}>
-              {featureCards.map(({ Icon, label }) => (
+        /* Empty state */
+        <div
+          style={{
+            minHeight: "calc(100vh - 0px)",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "40px",
+            gap: 0,
+          }}
+        >
+          {/* Glow icon */}
+          <div
+            className="glow-pulse"
+            style={{
+              width: 80, height: 80, borderRadius: 20,
+              background: "rgba(91,79,255,0.1)",
+              border: "0.5px solid rgba(91,79,255,0.2)",
+              display: "flex", alignItems: "center", justifyContent: "center",
+              marginBottom: 24,
+            }}
+          >
+            <Shield size={32} color="#5b4fff" strokeWidth={1.5} />
+          </div>
+
+          <h1 style={{ fontSize: 32, fontWeight: 600, letterSpacing: "-0.03em", textAlign: "center", marginBottom: 12, color: "#fff" }}>
+            Upload your first contract
+          </h1>
+          <p style={{ fontSize: 15, color: "rgba(255,255,255,0.4)", textAlign: "center", maxWidth: 420, margin: "0 auto 32px" }}>
+            Drop any PDF contract and get an instant AI risk report in plain English.
+          </p>
+
+          <UploadTrigger
+            label="Upload contract"
+            style={{
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+              background: "linear-gradient(135deg, #5b4fff, #7c3aed)",
+              border: "none", borderRadius: 980,
+              padding: "14px 32px", fontSize: 15, fontWeight: 600,
+              color: "white", cursor: "pointer", maxWidth: 280, width: "100%",
+              boxShadow: "0 4px 20px rgba(91,79,255,0.4), inset 0 1px 0 rgba(255,255,255,0.1)",
+              marginBottom: 40, transition: "opacity 0.15s",
+            }}
+          />
+
+          {/* Feature cards */}
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "center" }}>
+            {featureCards.map(({ Icon, label }) => (
+              <div
+                key={label}
+                style={{
+                  width: 130, padding: 14,
+                  background: "rgba(255,255,255,0.025)",
+                  border: "0.5px solid rgba(255,255,255,0.06)",
+                  borderRadius: 14,
+                }}
+              >
                 <div
-                  key={label}
                   style={{
-                    background: "rgba(255,255,255,0.025)",
-                    border: "0.5px solid rgba(255,255,255,0.05)",
-                    borderRadius: 10,
-                    padding: "14px 14px",
-                    maxWidth: 140,
+                    width: 28, height: 28, borderRadius: 7,
+                    background: "rgba(91,79,255,0.1)",
+                    border: "0.5px solid rgba(91,79,255,0.15)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    marginBottom: 10,
                   }}
                 >
-                  <div
-                    style={{
-                      width: 28,
-                      height: 28,
-                      borderRadius: 7,
-                      background: "rgba(99,102,241,0.1)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      marginBottom: 10,
-                    }}
-                  >
-                    <Icon size={14} color="#818cf8" />
-                  </div>
-                  <p style={{ fontSize: 12, fontWeight: 500, color: "rgba(255,255,255,0.5)", lineHeight: 1.4 }}>
-                    {label}
-                  </p>
+                  <Icon size={14} color="#818cf8" />
                 </div>
-              ))}
-            </div>
+                <p style={{ fontSize: 12, fontWeight: 500, color: "rgba(255,255,255,0.5)", lineHeight: 1.4 }}>
+                  {label}
+                </p>
+              </div>
+            ))}
           </div>
-        </>
+        </div>
       )}
     </div>
   );
