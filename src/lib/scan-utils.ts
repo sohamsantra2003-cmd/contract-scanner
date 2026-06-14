@@ -76,6 +76,8 @@ Each item must have exactly these keys:
 CRITICAL: Your entire response must be parseable as a JSON array.
 Start with [ and end with ]. Nothing before [. Nothing after ].
 
+Note: This document may be a template with unfilled fields (shown as dots, blanks, or placeholder text). Analyse the clauses as written — flag risks in the actual clause language, not in the unfilled fields. Unfilled placeholder fields are not themselves risks.
+
 CONTRACT TEXT:
 ${contractText}`;
 }
@@ -142,6 +144,8 @@ Rules:
 - Return NO preamble, NO markdown fences, ONLY the raw JSON object.
 - risk_score must reflect overall severity: mostly high clauses = 70-100, mostly medium = 30-69, mostly low or clean = 0-29.
 - If the document is not a contract, return risk_score: 0, an explanatory summary, and an empty clauses array.
+
+Note: This document may be a template with unfilled fields (shown as dots, blanks, or placeholder text). Analyse the clauses as written — flag risks in the actual clause language, not in the unfilled fields. Unfilled placeholder fields are not themselves risks.
 
 CONTRACT TEXT TO ANALYSE:
 ${contractText}`;
