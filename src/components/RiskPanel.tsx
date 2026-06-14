@@ -550,10 +550,20 @@ export function RiskPanel({
 
   // ── Error ──
   if (state.status === "error") {
+    const isComplexDocError =
+      state.message.includes("unreadable") ||
+      state.message.includes("too complex");
+
     return (
       <div style={{ background: "rgba(239,68,68,0.08)", border: "0.5px solid rgba(239,68,68,0.25)", borderRadius: 12, padding: "1.25rem" }}>
         <p style={{ fontSize: 13, fontWeight: 500, color: "#f87171", marginBottom: 6 }}>Analysis failed</p>
-        <p style={{ fontSize: 12.5, color: "rgba(255,120,120,0.7)", lineHeight: 1.5, marginBottom: 12 }}>{state.message}</p>
+        <p style={{ fontSize: 12.5, color: "rgba(255,120,120,0.7)", lineHeight: 1.5, marginBottom: isComplexDocError ? 8 : 12 }}>{state.message}</p>
+        {isComplexDocError && (
+          <div style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", lineHeight: 1.6, marginBottom: 12 }}>
+            <strong style={{ color: "rgba(255,255,255,0.7)" }}>Tip:</strong>
+            {" "}This document contains annexes and form templates that make it harder to analyse. Try uploading just the main agreement (pages 1–15 typically) without the annexes for a cleaner result.
+          </div>
+        )}
         <button
           onClick={() => dispatch({ status: "idle" })}
           style={{ fontSize: 12, color: "#818cf8", background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline" }}

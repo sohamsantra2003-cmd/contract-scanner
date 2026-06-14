@@ -21,7 +21,11 @@ export function cleanContractText(raw: string): string {
   return raw
     .replace(/\n{3,}/g, "\n\n")
     .replace(/^\s*\d+\s*$/gm, "")
-    .replace(/^.{1,5}$/gm, "")
+    .replace(/^.{1,4}$/gm, "")
+    .replace(/^[\s\-_=]{4,}$/gm, "")
+    .replace(/(\[[A-Z\s\/]+\][\s\n]*){3,}/g, "[template fields]\n")
+    .replace(/^[^|]*(\|[^|]*){2,}$/gm, "")
+    .replace(/^[\s\d\(\)\[\]\/\-\.]{10,}$/gm, "")
     .replace(/[ \t]{2,}/g, " ")
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
     .trim();

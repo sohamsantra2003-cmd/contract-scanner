@@ -144,77 +144,118 @@ export async function POST(request: NextRequest) {
   }
 
   const cleanedText = cleanContractText(extractedText);
-  const finalText = cleanedText.length > 40000
-    ? cleanedText.slice(0, 40000) + "\n\n[Note: Contract truncated to 40,000 characters for analysis]"
-    : cleanedText;
+  const MAX_CHARS = 32000;
+  let finalText: string;
+  if (cleanedText.length > MAX_CHARS) {
+    const annexPatterns = [
+      /\nAnnex\s+[A-Z]/i,
+      /\nANNEX\s+[A-Z]/,
+      /\nAppendix\s+[A-Z0-9]/i,
+      /\nSCHEDULE\s+[A-Z0-9]/i,
+      /\nExhibit\s+[A-Z0-9]/i,
+    ];
+    let cutPoint = MAX_CHARS;
+    for (const pattern of annexPatterns) {
+      const match = cleanedText.search(pattern);
+      if (match > cleanedText.length * 0.4 && match < MAX_CHARS) {
+        cutPoint = match;
+        break;
+      }
+    }
+    finalText =
+      cleanedText.slice(0, cutPoint) +
+      `\n\n[Note: Document truncated before annexes/appendices for analysis. ${Math.round(
+        ((cleanedText.length - cutPoint) / cleanedText.length) * 100
+      )}% of document (primarily annexes and forms) was excluded.]`;
+  } else {
+    finalText = cleanedText;
+  }
 
   // Step 6 — Build Gemini prompt
   const systemPrompt = buildScanPrompt(finalText);
 
-  // Step 7 — Call Gemini with env-aware timeout
+  // Steps 7+8 — Call Gemini with retry on JSON parse failure
   const SCAN_TIMEOUT_MS = process.env.NODE_ENV === "production" ? 55000 : 30000;
 
-  let rawResponse: string;
-  let tokensUsed: number;
+  let rawResponse = "";
+  let tokensUsed = 0;
+  let parsed: { summary: string; risk_score: number; clauses: Clause[] } | null = null;
 
-  try {
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => {
-        const err = new Error("Gemini timed out");
-        err.name = "AbortError";
-        reject(err);
-      }, SCAN_TIMEOUT_MS)
-    );
-    const { text, tokensUsed: tokens } = await Promise.race([
-      callGemini(systemPrompt, geminiToken),
-      timeoutPromise,
-    ]);
-    rawResponse = text;
-    tokensUsed = tokens;
-  } catch (error) {
-    await supabase.from("contracts").update({ status: "error" }).eq("id", contractId);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const retryPrompt =
+      attempt === 0
+        ? systemPrompt
+        : systemPrompt +
+          '\n\nCRITICAL: Your previous response could not be parsed as JSON. Return ONLY the raw JSON object. No backticks. No "```json". No explanation. Start your response with { and end with }';
 
-    const err = error as Error;
-    if (err.message.includes("429")) {
-      await supabase.from("contracts").update({ status: "pending" }).eq("id", contractId);
-      return NextResponse.json(
-        { error: "Analysis temporarily unavailable. Please try again in a few minutes." },
-        { status: 503 }
+    try {
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => {
+          const err = new Error("Gemini timed out");
+          err.name = "AbortError";
+          reject(err);
+        }, SCAN_TIMEOUT_MS)
       );
+      const { text, tokensUsed: tokens } = await Promise.race([
+        callGemini(retryPrompt, geminiToken),
+        timeoutPromise,
+      ]);
+      rawResponse = text;
+      tokensUsed = tokens;
+    } catch (error) {
+      await supabase.from("contracts").update({ status: "error" }).eq("id", contractId);
+      const err = error as Error;
+      if (err.message.includes("429")) {
+        await supabase.from("contracts").update({ status: "pending" }).eq("id", contractId);
+        return NextResponse.json(
+          { error: "Analysis temporarily unavailable. Please try again in a few minutes." },
+          { status: 503 }
+        );
+      }
+      if (err.name === "AbortError") {
+        return NextResponse.json(
+          { error: "Analysis timed out. Please try again." },
+          { status: 504 }
+        );
+      }
+      return NextResponse.json({ error: "Analysis failed. Please try again." }, { status: 500 });
     }
-    if (err.name === "AbortError") {
-      return NextResponse.json(
-        { error: "Analysis timed out. Please try again." },
-        { status: 504 }
-      );
+
+    const cleanedJson = rawResponse
+      .replace(/^```json\s*/i, "")
+      .replace(/^```\s*/i, "")
+      .replace(/```\s*$/i, "")
+      .replace(/^[^{]*({)/, "$1")
+      .replace(/(})[^}]*$/, "$1")
+      .trim();
+
+    try {
+      parsed = JSON.parse(cleanedJson);
+      break;
+    } catch {
+      console.error(`[scan] JSON parse failed (attempt ${attempt + 1}). Raw length: ${rawResponse.length}`);
+      console.error("[scan] First 500 chars:", rawResponse.slice(0, 500));
+      if (attempt >= 1) {
+        await supabase.from("contracts").update({ status: "error" }).eq("id", contractId);
+        return NextResponse.json(
+          { error: "AI returned an unreadable response after 2 attempts.", raw: rawResponse.slice(0, 500) },
+          { status: 422 }
+        );
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000));
     }
-    return NextResponse.json({ error: "Analysis failed. Please try again." }, { status: 500 });
   }
 
-  // Step 8 — Parse and validate Gemini JSON
-  const cleaned = rawResponse
-    .replace(/^```json\s*/i, "")
-    .replace(/^```\s*/i, "")
-    .replace(/```\s*$/i, "")
-    .trim();
-
-  let parsed: { summary: string; risk_score: number; clauses: Clause[] };
-  try {
-    parsed = JSON.parse(cleaned);
-  } catch {
-    console.error("Gemini raw response (parse failed):", rawResponse);
+  if (!parsed) {
     await supabase.from("contracts").update({ status: "error" }).eq("id", contractId);
-    return NextResponse.json(
-      { error: "AI returned an unreadable response.", raw: rawResponse },
-      { status: 422 }
-    );
+    return NextResponse.json({ error: "AI returned an unreadable response." }, { status: 422 });
   }
 
   if (typeof parsed.risk_score !== "number" || !Array.isArray(parsed.clauses)) {
-    console.error("Gemini raw response (validation failed):", rawResponse);
+    console.error("[scan] Gemini response validation failed:", rawResponse.slice(0, 500));
     await supabase.from("contracts").update({ status: "error" }).eq("id", contractId);
     return NextResponse.json(
-      { error: "AI response was missing required fields.", raw: rawResponse },
+      { error: "AI response was missing required fields.", raw: rawResponse.slice(0, 500) },
       { status: 422 }
     );
   }

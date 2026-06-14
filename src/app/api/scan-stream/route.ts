@@ -128,58 +128,107 @@ export async function POST(req: NextRequest) {
         }
 
         const cleanedText = cleanContractText(rawText);
-        const finalText = cleanedText.length > 40000
-          ? cleanedText.slice(0, 40000) + "\n\n[Truncated to 40,000 chars]"
-          : cleanedText;
+        const MAX_CHARS = 32000;
+        let finalText: string;
+        if (cleanedText.length > MAX_CHARS) {
+          const annexPatterns = [
+            /\nAnnex\s+[A-Z]/i,
+            /\nANNEX\s+[A-Z]/,
+            /\nAppendix\s+[A-Z0-9]/i,
+            /\nSCHEDULE\s+[A-Z0-9]/i,
+            /\nExhibit\s+[A-Z0-9]/i,
+          ];
+          let cutPoint = MAX_CHARS;
+          for (const pattern of annexPatterns) {
+            const match = cleanedText.search(pattern);
+            if (match > cleanedText.length * 0.4 && match < MAX_CHARS) {
+              cutPoint = match;
+              break;
+            }
+          }
+          finalText =
+            cleanedText.slice(0, cutPoint) +
+            `\n\n[Note: Document truncated before annexes/appendices for analysis. ${Math.round(
+              ((cleanedText.length - cutPoint) / cleanedText.length) * 100
+            )}% of document (primarily annexes and forms) was excluded.]`;
+        } else {
+          finalText = cleanedText;
+        }
 
         controller.enqueue(sseEvent("status", { message: "Analysing contract with Gemini..." }));
 
-        // ── Stream from Gemini ────────────────────────────────────────────
+        // ── Build prompt ──────────────────────────────────────────────────
         const systemPrompt = buildScanPrompt(finalText);
-        const geminiStream = await streamGemini(systemPrompt, geminiToken);
 
-        let accumulatedText = "";
-        const reader = geminiStream.getReader();
-        const decoder = new TextDecoder();
+        // ── Stream from Gemini with retry on parse failure ────────────────
+        let parsedResult: { summary: string; risk_score: number; clauses: Clause[] } | null = null;
 
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const retryPrompt =
+            attempt === 0
+              ? systemPrompt
+              : systemPrompt +
+                '\n\nCRITICAL: Your previous response could not be parsed as JSON. Return ONLY the raw JSON object. No backticks. No "```json". No explanation. Start your response with { and end with }';
 
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split("\n");
+          if (attempt === 1) {
+            controller.enqueue(sseEvent("status", { message: "Retrying analysis with adjusted prompt..." }));
+            await new Promise((resolve) => setTimeout(resolve, 1000));
+          }
 
-          for (const line of lines) {
-            if (!line.startsWith("data: ")) continue;
-            const jsonStr = line.slice(6).trim();
-            if (!jsonStr || jsonStr === "[DONE]") continue;
+          const geminiStream = await streamGemini(retryPrompt, geminiToken);
+          let accumulatedText = "";
+          const reader = geminiStream.getReader();
+          const decoder = new TextDecoder();
 
-            try {
-              const parsed = JSON.parse(jsonStr);
-              const text = parsed?.candidates?.[0]?.content?.parts?.[0]?.text;
-              if (text) {
-                accumulatedText += text;
-                controller.enqueue(sseEvent("chunk", { text }));
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            const chunk = decoder.decode(value, { stream: true });
+            const lines = chunk.split("\n");
+
+            for (const line of lines) {
+              if (!line.startsWith("data: ")) continue;
+              const jsonStr = line.slice(6).trim();
+              if (!jsonStr || jsonStr === "[DONE]") continue;
+
+              try {
+                const geminiChunk = JSON.parse(jsonStr);
+                const text = geminiChunk?.candidates?.[0]?.content?.parts?.[0]?.text;
+                if (text) {
+                  accumulatedText += text;
+                  controller.enqueue(sseEvent("chunk", { text }));
+                }
+              } catch {
+                // Malformed chunk — skip
               }
-            } catch {
-              // Malformed chunk — skip
+            }
+          }
+
+          const cleanedJson = accumulatedText
+            .replace(/^```json\s*/i, "")
+            .replace(/^```\s*/i, "")
+            .replace(/```\s*$/i, "")
+            .replace(/^[^{]*({)/, "$1")
+            .replace(/(})[^}]*$/, "$1")
+            .trim();
+
+          try {
+            parsedResult = JSON.parse(cleanedJson);
+            break;
+          } catch {
+            console.error(`[scan-stream] JSON parse failed (attempt ${attempt + 1}). Length: ${accumulatedText.length}`);
+            console.error("[scan-stream] First 500 chars:", accumulatedText.slice(0, 500));
+            if (attempt >= 1) {
+              await supabase.from("contracts").update({ status: "error" }).eq("id", contractId);
+              controller.enqueue(sseEvent("error", { message: "AI returned an unreadable response after 2 attempts." }));
+              controller.close();
+              return;
             }
           }
         }
 
-        // ── Parse final JSON ──────────────────────────────────────────────
-        const cleaned = accumulatedText
-          .replace(/^```json\s*/i, "")
-          .replace(/^```\s*/i, "")
-          .replace(/```\s*$/i, "")
-          .trim();
-
-        let parsedResult: { summary: string; risk_score: number; clauses: Clause[] };
-        try {
-          parsedResult = JSON.parse(cleaned);
-        } catch {
-          console.error("[scan-stream] JSON parse failed. Accumulated length:", accumulatedText.length);
-          console.error("[scan-stream] First 500 chars:", accumulatedText.slice(0, 500));
+        if (!parsedResult) {
           await supabase.from("contracts").update({ status: "error" }).eq("id", contractId);
           controller.enqueue(sseEvent("error", { message: "AI returned an unreadable response." }));
           controller.close();
