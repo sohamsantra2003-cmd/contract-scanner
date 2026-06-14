@@ -1,4 +1,8 @@
 import { NextRequest } from "next/server";
+
+const debug = (...args: unknown[]) => {
+  if (process.env.NODE_ENV !== "production") console.log(...args);
+};
 import { createClient } from "@/lib/supabase/server";
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { callGemini, streamGemini } from "@/lib/gemini";
@@ -161,7 +165,7 @@ export async function POST(req: NextRequest) {
         const { text: finalText, wasTruncated, truncatedAt } =
           mode === "chunked" ? { text: cleanedText, wasTruncated: false, truncatedAt: "" } : smartTruncate(cleanedText);
 
-        console.log(`[scan-stream] mode=${mode} inputChars=${cleanedText.length} finalChars=${finalText.length} truncated=${wasTruncated} truncatedAt=${truncatedAt} outputTokens=${outputTokens}`);
+        debug(`[scan-stream] mode=${mode} inputChars=${cleanedText.length} finalChars=${finalText.length} truncated=${wasTruncated} truncatedAt=${truncatedAt} outputTokens=${outputTokens}`);
 
         let parsedResult: { summary: string; risk_score: number; clauses: Clause[] } | null = null;
 
@@ -256,7 +260,7 @@ export async function POST(req: NextRequest) {
             try {
               const p = JSON.parse(cleanJson(accumulatedText, true));
               clauses = Array.isArray(p) ? p : (Array.isArray(p.clauses) ? p.clauses : []);
-              console.log(`[scan-stream] pass1 clauses=${clauses.length}`);
+              debug(`[scan-stream] pass1 clauses=${clauses.length}`);
               break;
             } catch (e) {
               console.error(`[scan-stream] pass1 attempt ${attempt + 1} failed: ${e}`);
@@ -293,7 +297,7 @@ export async function POST(req: NextRequest) {
         else {
           const chunks = chunkDocument(finalText, 10000, 500);
           const totalChunks = chunks.length;
-          console.log(`[scan-stream] chunked: ${totalChunks} chunks`);
+          debug(`[scan-stream] chunked: ${totalChunks} chunks`);
 
           controller.enqueue(sseEvent("status", {
             message: `Analysing ${totalChunks} sections in parallel...`,
@@ -335,7 +339,7 @@ export async function POST(req: NextRequest) {
           }
 
           const clauses = deduplicateClauses(allClauses);
-          console.log(`[scan-stream] chunked dedup: ${allClauses.length} → ${clauses.length}`);
+          debug(`[scan-stream] chunked dedup: ${allClauses.length} → ${clauses.length}`);
 
           controller.enqueue(sseEvent("status", {
             message: `All ${totalChunks} sections analysed. Found ${clauses.length} risk areas. Generating summary...`,

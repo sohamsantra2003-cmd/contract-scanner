@@ -1,5 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
+
+export const runtime = "nodejs";
+export const maxDuration = 60;
+
+const debug = (...args: unknown[]) => {
+  if (process.env.NODE_ENV !== "production") console.log(...args);
+};
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { callGemini } from "@/lib/gemini";
 import {
@@ -89,7 +96,7 @@ export async function POST(request: NextRequest) {
   );
 
   const { data: userRecord } = await adminSupabase.from("users").select("scans_used, tier").eq("id", user.id).single();
-  console.log(`[scan] user=${user.id} scans_used=${userRecord?.scans_used} tier=${userRecord?.tier}`);
+  debug(`[scan] scans_used=${userRecord?.scans_used} tier=${userRecord?.tier}`);
 
   if (contract.status === "scanning") {
     return NextResponse.json({ error: "Scan already in progress" }, { status: 409 });
@@ -172,7 +179,7 @@ export async function POST(request: NextRequest) {
   const { text: finalText, wasTruncated, truncatedAt } =
     mode === "chunked" ? { text: cleanedText, wasTruncated: false, truncatedAt: "" } : smartTruncate(cleanedText);
 
-  console.log(`[scan] mode=${mode} inputChars=${cleanedText.length} finalChars=${finalText.length} truncated=${wasTruncated} truncatedAt=${truncatedAt} outputTokens=${outputTokens}`);
+  debug(`[scan] mode=${mode} inputChars=${cleanedText.length} finalChars=${finalText.length} truncated=${wasTruncated} truncatedAt=${truncatedAt} outputTokens=${outputTokens}`);
 
   // ── Analysis mode router ─────────────────────────────────────────────────
   let parsedResult: { summary: string; risk_score: number; clauses: Clause[] } | null = null;
@@ -230,10 +237,10 @@ export async function POST(request: NextRequest) {
         : buildClausesOnlyPrompt(finalText) + "\n\nCRITICAL: Return ONLY a JSON array starting with [ and ending with ]. No wrapper object.";
       try {
         const { text: raw } = await callGemini(prompt, geminiToken, 16000);
-        console.log(`[scan] pass1 attempt=${attempt + 1} rawLength=${raw.length}`);
+        debug(`[scan] pass1 attempt=${attempt + 1} rawLength=${raw.length}`);
         const p = JSON.parse(cleanJson(raw, true));
         clauses = Array.isArray(p) ? p : (Array.isArray(p.clauses) ? p.clauses : []);
-        console.log(`[scan] pass1 clauses=${clauses.length}`);
+        debug(`[scan] pass1 clauses=${clauses.length}`);
         break;
       } catch (e) {
         console.error(`[scan] pass1 attempt ${attempt + 1} failed: ${e}`);
@@ -247,7 +254,7 @@ export async function POST(request: NextRequest) {
     let summaryData = { summary: "", risk_score: 0 };
     try {
       const { text: rawSum } = await callGemini(buildSynthesisPrompt(clauses), geminiToken, 1024);
-      console.log(`[scan] pass2 rawLength=${rawSum.length}`);
+      debug(`[scan] pass2 rawLength=${rawSum.length}`);
       summaryData = JSON.parse(cleanJson(rawSum));
     } catch (e) {
       console.error(`[scan] pass2 failed: ${e}`);
@@ -266,7 +273,7 @@ export async function POST(request: NextRequest) {
   // ── CHUNKED (Phase 2) ────────────────────────────────────────────────────
   else {
     const chunks = chunkDocument(finalText, 10000, 500);
-    console.log(`[scan] chunked: ${chunks.length} chunks from ${finalText.length} chars`);
+    debug(`[scan] chunked: ${chunks.length} chunks from ${finalText.length} chars`);
 
     let allClauses: Clause[] = [];
 
@@ -279,7 +286,7 @@ export async function POST(request: NextRequest) {
             const { text: raw } = await callGemini(buildChunkPrompt(chunk, idx, chunks.length), geminiToken, 4096);
             const p = JSON.parse(cleanJson(raw, true));
             const found = Array.isArray(p) ? p : [];
-            console.log(`[scan] chunk ${idx + 1}/${chunks.length}: ${found.length} clauses`);
+            debug(`[scan] chunk ${idx + 1}/${chunks.length}: ${found.length} clauses`);
             return found as Clause[];
           } catch (e) {
             console.error(`[scan] chunk ${idx + 1} failed: ${e}`);
@@ -294,7 +301,7 @@ export async function POST(request: NextRequest) {
     }
 
     const clauses = deduplicateClauses(allClauses);
-    console.log(`[scan] chunked dedup: ${allClauses.length} → ${clauses.length}`);
+    debug(`[scan] chunked dedup: ${allClauses.length} → ${clauses.length}`);
 
     let summaryData = { summary: "", risk_score: 0 };
     try {
