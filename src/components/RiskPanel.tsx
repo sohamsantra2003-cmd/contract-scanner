@@ -1,12 +1,12 @@
 "use client";
 
 import { useReducer, useState, useEffect, useRef } from "react";
-import { ShieldCheck, Copy, Check, Download, RefreshCw, ScanLine, Lock, FileWarning, Clock } from "lucide-react";
+import { ShieldCheck, Copy, Check, Download, RefreshCw, ScanLine, Lock, FileWarning, Clock, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { exportScanReport } from "@/lib/export-pdf";
 
-// ── Types ────────────────────────────────────────────────────────────────────
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 type Clause = {
   text: string;
@@ -35,12 +35,12 @@ function reducer(_prev: ScanState, next: ScanState): ScanState {
   return next;
 }
 
-// ── Helpers ──────────────────────────────────────────────────────────────────
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function scoreColor(score: number) {
-  if (score <= 29) return "#4ade80";
-  if (score <= 69) return "#fbbf24";
-  return "#f87171";
+  if (score <= 29) return "#34c759";
+  if (score <= 69) return "#ff9500";
+  return "#ff4d4d";
 }
 
 function scoreGrade(score: number) {
@@ -52,15 +52,15 @@ function scoreGrade(score: number) {
 }
 
 function severityColor(s: string) {
-  if (s === "high") return "#f87171";
-  if (s === "medium") return "#fbbf24";
-  return "#4ade80";
+  if (s === "high") return "#ff4d4d";
+  if (s === "medium") return "#ff9500";
+  return "#34c759";
 }
 
 function severityBg(s: string) {
-  if (s === "high") return "rgba(239,68,68,0.1)";
-  if (s === "medium") return "rgba(234,179,8,0.1)";
-  return "rgba(34,197,94,0.1)";
+  if (s === "high") return "rgba(255,77,77,0.1)";
+  if (s === "medium") return "rgba(255,149,0,0.1)";
+  return "rgba(52,199,89,0.1)";
 }
 
 function categoryLabel(cat: string) {
@@ -126,7 +126,7 @@ function CopyButton({ text }: { text: string }) {
         borderRadius: 6,
         padding: "3px 8px",
         fontSize: 11,
-        color: copied ? "#4ade80" : "rgba(255,255,255,0.3)",
+        color: copied ? "#34c759" : "rgba(255,255,255,0.3)",
         cursor: "pointer",
       }}
     >
@@ -145,18 +145,25 @@ interface ClauseCardProps {
 
 function ClauseCard({ clause, isActive, targetPage, onClick }: ClauseCardProps) {
   const [expanded, setExpanded] = useState(false);
+  const [hovered, setHovered] = useState(false);
   const isLong = clause.text.length > 200;
 
   return (
     <div
       onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
-        background: isActive ? "rgba(99,102,241,0.06)" : "rgba(255,255,255,0.02)",
-        borderTop: isActive ? "0.5px solid rgba(99,102,241,0.5)" : "0.5px solid rgba(255,255,255,0.06)",
-        borderRight: isActive ? "0.5px solid rgba(99,102,241,0.5)" : "0.5px solid rgba(255,255,255,0.06)",
-        borderBottom: isActive ? "0.5px solid rgba(99,102,241,0.5)" : "0.5px solid rgba(255,255,255,0.06)",
+        background: isActive
+          ? "rgba(91,79,255,0.08)"
+          : hovered
+          ? "rgba(255,255,255,0.04)"
+          : "rgba(255,255,255,0.02)",
+        borderTop: isActive ? "0.5px solid rgba(91,79,255,0.5)" : "0.5px solid rgba(255,255,255,0.06)",
+        borderRight: isActive ? "0.5px solid rgba(91,79,255,0.5)" : "0.5px solid rgba(255,255,255,0.06)",
+        borderBottom: isActive ? "0.5px solid rgba(91,79,255,0.5)" : "0.5px solid rgba(255,255,255,0.06)",
         borderLeft: `3px solid ${severityColor(clause.severity)}`,
-        borderRadius: 10,
+        borderRadius: 12,
         padding: 14,
         marginBottom: 8,
         cursor: "pointer",
@@ -209,7 +216,7 @@ function ClauseCard({ clause, isActive, targetPage, onClick }: ClauseCardProps) 
       {isLong && (
         <button
           onClick={(e) => { e.stopPropagation(); setExpanded((x) => !x); }}
-          style={{ background: "none", border: "none", padding: 0, fontSize: 11, color: "#6366f1", cursor: "pointer", marginBottom: 8 }}
+          style={{ background: "none", border: "none", padding: 0, fontSize: 11, color: "#5b4fff", cursor: "pointer", marginBottom: 8 }}
         >
           {expanded ? "Show less" : "Show more"}
         </button>
@@ -219,9 +226,9 @@ function ClauseCard({ clause, isActive, targetPage, onClick }: ClauseCardProps) 
         {clause.explanation}
       </p>
 
-      <div style={{ background: "rgba(99,102,241,0.05)", borderRadius: 8, padding: "10px 12px" }}>
+      <div style={{ background: "rgba(91,79,255,0.05)", borderRadius: 8, padding: "10px 12px" }}>
         <div className="flex items-center justify-between" style={{ marginBottom: 6 }}>
-          <span style={{ fontSize: 10, fontWeight: 500, letterSpacing: "0.08em", textTransform: "uppercase", color: "#6366f1" }}>
+          <span style={{ fontSize: 10, fontWeight: 500, letterSpacing: "0.08em", textTransform: "uppercase", color: "#5b4fff" }}>
             Safer alternative
           </span>
           <CopyButton text={clause.rewrite} />
@@ -276,7 +283,7 @@ function ScanningView({ statusMessage, streamingText, chunkProgress }: ScanningV
       <div style={{ width: "100%", height: 3, background: "rgba(255,255,255,0.06)", borderRadius: 9999 }}>
         <div
           className="transition-all duration-300"
-          style={{ width: `${progress}%`, height: 3, background: "#4f46e5", borderRadius: 9999 }}
+          style={{ width: `${progress}%`, height: 3, background: "#5b4fff", borderRadius: 9999 }}
         />
       </div>
       {chunkProgress ? (
@@ -288,7 +295,7 @@ function ScanningView({ statusMessage, streamingText, chunkProgress }: ScanningV
             {Array.from({ length: chunkProgress.total }).map((_, i) => (
               <div key={i} style={{
                 width: 12, height: 4, borderRadius: 2,
-                background: i < chunkProgress.completed ? "#4f46e5" : "rgba(255,255,255,0.08)",
+                background: i < chunkProgress.completed ? "#5b4fff" : "rgba(255,255,255,0.08)",
                 transition: "background 0.2s",
               }} />
             ))}
@@ -327,26 +334,26 @@ function ScanningView({ statusMessage, streamingText, chunkProgress }: ScanningV
   );
 }
 
-// ── Skeleton ──────────────────────────────────────────────────────────────────
+// ── Skeleton ───────────────────────────────────────────────────────────────────
 
 export function RiskPanelSkeleton() {
   return (
     <div style={{ padding: "1.5rem", display: "flex", flexDirection: "column", gap: 12 }}>
+      <Skeleton style={{ height: 120, borderRadius: 14 }} />
       <Skeleton style={{ height: 80, borderRadius: 12 }} />
-      <Skeleton style={{ height: 60, borderRadius: 10 }} />
       <div style={{ display: "flex", gap: 6 }}>
         {[80, 100, 90, 110].map((w, i) => (
-          <Skeleton key={i} style={{ width: w, height: 26, borderRadius: 9999 }} />
+          <Skeleton key={i} style={{ width: w, height: 28, borderRadius: 9999 }} />
         ))}
       </div>
       {[1, 2, 3].map((i) => (
-        <Skeleton key={i} style={{ height: 100, borderRadius: 10 }} />
+        <Skeleton key={i} style={{ height: 110, borderRadius: 12 }} />
       ))}
     </div>
   );
 }
 
-// ── Main component ────────────────────────────────────────────────────────────
+// ── Main component ─────────────────────────────────────────────────────────────
 
 interface RiskPanelProps {
   contractId: string;
@@ -356,6 +363,8 @@ interface RiskPanelProps {
   initiallyScanning?: boolean;
   pageTexts?: string[];
   onClauseClick?: (page: number) => void;
+  onScanStart?: () => void;
+  onScanEnd?: () => void;
 }
 
 export function RiskPanel({
@@ -366,6 +375,8 @@ export function RiskPanel({
   initiallyScanning,
   pageTexts,
   onClauseClick,
+  onScanStart,
+  onScanEnd,
 }: RiskPanelProps) {
   const [state, dispatch] = useReducer(
     reducer,
@@ -406,13 +417,14 @@ export function RiskPanel({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.status]);
 
-  // ── Core SSE fetch (shared by startScan and handleRescan) ─────────────────
+  // ── Core SSE fetch ────────────────────────────────────────────────────────────
   async function runScan() {
     let settled = false;
     const clientTimeout = setTimeout(() => {
       if (!settled) {
         settled = true;
         dispatch({ status: "error", message: "Analysis timed out. Please try again." });
+        onScanEnd?.();
         toast.error("Analysis failed", { description: "Analysis timed out. Please try again." });
       }
     }, 60000);
@@ -462,6 +474,7 @@ export function RiskPanel({
                   settled = true;
                   clearTimeout(clientTimeout);
                   dispatch({ status: "done", scan: payload.scan });
+                  onScanEnd?.();
                   toast.success("Analysis complete", {
                     description: `Risk score: ${payload.scan.risk_score}/100`,
                   });
@@ -480,6 +493,7 @@ export function RiskPanel({
                   settled = true;
                   clearTimeout(clientTimeout);
                   dispatch({ status: "error", message: payload.message });
+                  onScanEnd?.();
                   toast.error("Analysis failed", { description: payload.message });
                   break;
               }
@@ -495,6 +509,7 @@ export function RiskPanel({
         settled = true;
         clearTimeout(clientTimeout);
         dispatch({ status: "error", message: "Connection lost. Please try again." });
+        onScanEnd?.();
         toast.error("Analysis failed", { description: "Connection lost. Please try again." });
       }
     }
@@ -502,6 +517,7 @@ export function RiskPanel({
 
   async function startScan() {
     dispatch({ status: "scanning" });
+    onScanStart?.();
     setScanStatusMessage("Connecting to Gemini...");
     setStreamingText("");
     setChunkProgress(null);
@@ -525,6 +541,7 @@ export function RiskPanel({
         // 409 means a scan is already running — just show scanning state
         if (resetRes.status === 409) {
           dispatch({ status: "scanning" });
+          onScanStart?.();
           return;
         }
         dispatch({ status: "error", message: resetData.error ?? "Failed to reset contract. Please try again." });
@@ -539,6 +556,7 @@ export function RiskPanel({
     await new Promise((resolve) => setTimeout(resolve, 300));
 
     dispatch({ status: "scanning" });
+    onScanStart?.();
     await runScan();
   }
 
@@ -550,17 +568,27 @@ export function RiskPanel({
         style={{
           background: "rgba(255,255,255,0.025)",
           border: "0.5px solid rgba(255,255,255,0.07)",
-          borderRadius: 14,
-          padding: "2rem 1.5rem",
-          gap: 12,
+          borderRadius: 16,
+          padding: "2.5rem 1.5rem",
+          gap: 14,
         }}
       >
-        <ShieldCheck size={40} color="#818cf8" strokeWidth={1.5} />
+        <div
+          className="glow-pulse"
+          style={{
+            width: 60, height: 60, borderRadius: "50%",
+            background: "rgba(91,79,255,0.12)",
+            border: "0.5px solid rgba(91,79,255,0.25)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}
+        >
+          <ShieldCheck size={28} color="#818cf8" strokeWidth={1.5} />
+        </div>
         <div>
-          <h3 style={{ fontSize: 16, fontWeight: 500, color: "#ffffff", marginBottom: 6 }}>
-            Ready to analyse
+          <h3 style={{ fontSize: 24, fontWeight: 600, color: "#ffffff", marginBottom: 8, letterSpacing: "-0.02em" }}>
+            Ready to Analyse
           </h3>
-          <p style={{ fontSize: 12.5, color: "rgba(255,255,255,0.3)", lineHeight: 1.6 }}>
+          <p style={{ fontSize: 13, color: "rgba(255,255,255,0.3)", lineHeight: 1.6 }}>
             This contract hasn&apos;t been scanned yet. Click below to identify risky clauses.
           </p>
         </div>
@@ -568,19 +596,22 @@ export function RiskPanel({
           onClick={startScan}
           style={{
             width: "100%",
-            background: "#4f46e5",
+            height: 52,
+            background: "linear-gradient(135deg, #5b4fff, #7c3aed)",
             color: "white",
             border: "none",
-            borderRadius: 10,
-            padding: "11px",
-            fontSize: 14,
-            fontWeight: 500,
+            borderRadius: 14,
+            fontSize: 15,
+            fontWeight: 600,
             letterSpacing: "-0.01em",
             cursor: "pointer",
-            boxShadow: "inset 0 1px 0 rgba(255,255,255,0.08), 0 4px 16px rgba(79,70,229,0.3)",
+            boxShadow: "0 4px 20px rgba(91,79,255,0.4)",
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
             marginTop: 4,
+            fontFamily: "inherit",
           }}
         >
+          <Zap size={17} />
           Analyse contract
         </button>
       </div>
@@ -602,14 +633,14 @@ export function RiskPanel({
 
     if (isScanned) {
       return (
-        <div style={{ background: "rgba(251,191,36,0.06)", border: "0.5px solid rgba(251,191,36,0.25)", borderRadius: 12, padding: "1.25rem" }}>
+        <div style={{ background: "rgba(255,149,0,0.06)", border: "0.5px solid rgba(255,149,0,0.25)", borderRadius: 12, padding: "1.25rem" }}>
           <div className="flex items-center" style={{ gap: 8, marginBottom: 8 }}>
-            <ScanLine size={16} color="#fbbf24" />
-            <p style={{ fontSize: 13, fontWeight: 500, color: "#fbbf24", margin: 0 }}>Scanned PDF detected</p>
+            <ScanLine size={16} color="#ff9500" />
+            <p style={{ fontSize: 13, fontWeight: 500, color: "#ff9500", margin: 0 }}>Scanned PDF detected</p>
           </div>
-          <p style={{ fontSize: 12.5, color: "rgba(255,200,100,0.7)", lineHeight: 1.6, marginBottom: 12, whiteSpace: "pre-line" }}>
+          <p style={{ fontSize: 12.5, color: "rgba(255,180,80,0.7)", lineHeight: 1.6, marginBottom: 12, whiteSpace: "pre-line" }}>
             {"This PDF contains scanned images rather than selectable text.\n\nTo fix this:\n• Adobe Acrobat → Tools → Enhance Scans → Recognize Text\n• Free OCR: "}
-            <a href="https://smallpdf.com/pdf-to-word" target="_blank" rel="noopener noreferrer" style={{ color: "#fbbf24" }}>smallpdf.com/pdf-to-word</a>
+            <a href="https://smallpdf.com/pdf-to-word" target="_blank" rel="noopener noreferrer" style={{ color: "#ff9500" }}>smallpdf.com/pdf-to-word</a>
             {"\n• Or export as PDF directly from Word / Google Docs"}
           </p>
           <button onClick={() => dispatch({ status: "idle" })} style={{ fontSize: 12, color: "#818cf8", background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline" }}>
@@ -621,14 +652,14 @@ export function RiskPanel({
 
     if (isPassword) {
       return (
-        <div style={{ background: "rgba(251,191,36,0.06)", border: "0.5px solid rgba(251,191,36,0.25)", borderRadius: 12, padding: "1.25rem" }}>
+        <div style={{ background: "rgba(255,149,0,0.06)", border: "0.5px solid rgba(255,149,0,0.25)", borderRadius: 12, padding: "1.25rem" }}>
           <div className="flex items-center" style={{ gap: 8, marginBottom: 8 }}>
-            <Lock size={16} color="#fbbf24" />
-            <p style={{ fontSize: 13, fontWeight: 500, color: "#fbbf24", margin: 0 }}>Password-protected PDF</p>
+            <Lock size={16} color="#ff9500" />
+            <p style={{ fontSize: 13, fontWeight: 500, color: "#ff9500", margin: 0 }}>Password-protected PDF</p>
           </div>
-          <p style={{ fontSize: 12.5, color: "rgba(255,200,100,0.7)", lineHeight: 1.6, marginBottom: 12 }}>
+          <p style={{ fontSize: 12.5, color: "rgba(255,180,80,0.7)", lineHeight: 1.6, marginBottom: 12 }}>
             {"To remove the password:\n• Adobe Acrobat: File → Properties → Security → Change to \"No Security\"\n• Online (free): "}
-            <a href="https://smallpdf.com/unlock-pdf" target="_blank" rel="noopener noreferrer" style={{ color: "#fbbf24" }}>smallpdf.com/unlock-pdf</a>
+            <a href="https://smallpdf.com/unlock-pdf" target="_blank" rel="noopener noreferrer" style={{ color: "#ff9500" }}>smallpdf.com/unlock-pdf</a>
             {"\n• Google Chrome: Open PDF → Print → Save as PDF"}
           </p>
           <button onClick={() => dispatch({ status: "idle" })} style={{ fontSize: 12, color: "#818cf8", background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline" }}>
@@ -640,7 +671,7 @@ export function RiskPanel({
 
     if (isComplex) {
       return (
-        <div style={{ background: "rgba(99,102,241,0.06)", border: "0.5px solid rgba(99,102,241,0.25)", borderRadius: 12, padding: "1.25rem" }}>
+        <div style={{ background: "rgba(91,79,255,0.06)", border: "0.5px solid rgba(91,79,255,0.25)", borderRadius: 12, padding: "1.25rem" }}>
           <div className="flex items-center" style={{ gap: 8, marginBottom: 8 }}>
             <FileWarning size={16} color="#818cf8" />
             <p style={{ fontSize: 13, fontWeight: 500, color: "#818cf8", margin: 0 }}>Document too complex to parse</p>
@@ -657,12 +688,12 @@ export function RiskPanel({
 
     if (isTimeout) {
       return (
-        <div style={{ background: "rgba(251,146,60,0.06)", border: "0.5px solid rgba(251,146,60,0.25)", borderRadius: 12, padding: "1.25rem" }}>
+        <div style={{ background: "rgba(255,77,77,0.06)", border: "0.5px solid rgba(255,77,77,0.25)", borderRadius: 12, padding: "1.25rem" }}>
           <div className="flex items-center" style={{ gap: 8, marginBottom: 8 }}>
-            <Clock size={16} color="#fb923c" />
-            <p style={{ fontSize: 13, fontWeight: 500, color: "#fb923c", margin: 0 }}>Analysis timed out</p>
+            <Clock size={16} color="#ff4d4d" />
+            <p style={{ fontSize: 13, fontWeight: 500, color: "#ff4d4d", margin: 0 }}>Analysis timed out</p>
           </div>
-          <p style={{ fontSize: 12.5, color: "rgba(255,180,120,0.7)", lineHeight: 1.6, marginBottom: 12 }}>
+          <p style={{ fontSize: 12.5, color: "rgba(255,120,120,0.7)", lineHeight: 1.6, marginBottom: 12 }}>
             This contract is taking longer than expected. Please try again — Gemini processes faster on retry.
           </p>
           <button onClick={() => dispatch({ status: "idle" })} style={{ fontSize: 12, color: "#818cf8", background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline" }}>
@@ -673,8 +704,8 @@ export function RiskPanel({
     }
 
     return (
-      <div style={{ background: "rgba(239,68,68,0.08)", border: "0.5px solid rgba(239,68,68,0.25)", borderRadius: 12, padding: "1.25rem" }}>
-        <p style={{ fontSize: 13, fontWeight: 500, color: "#f87171", marginBottom: 6 }}>Analysis failed</p>
+      <div style={{ background: "rgba(255,77,77,0.08)", border: "0.5px solid rgba(255,77,77,0.25)", borderRadius: 12, padding: "1.25rem" }}>
+        <p style={{ fontSize: 13, fontWeight: 500, color: "#ff4d4d", marginBottom: 6 }}>Analysis failed</p>
         <p style={{ fontSize: 12.5, color: "rgba(255,120,120,0.7)", lineHeight: 1.5, marginBottom: 12 }}>{state.message}</p>
         <button onClick={() => dispatch({ status: "idle" })} style={{ fontSize: 12, color: "#818cf8", background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline" }}>
           Try again
@@ -714,60 +745,28 @@ export function RiskPanel({
 
   return (
     <>
-      <div className="flex flex-col" style={{ gap: 14 }}>
+      <div className="flex flex-col" style={{ gap: 14, paddingBottom: 80 }}>
 
-        {/* Action buttons row */}
-        <div className="flex flex-wrap" style={{ gap: 0 }}>
-          <button
-            onClick={() => exportScanReport(scan, contractTitle)}
-            className="flex items-center hover:opacity-80 transition-opacity"
-            style={{
-              gap: 6,
-              background: "rgba(255,255,255,0.04)",
-              border: "0.5px solid rgba(255,255,255,0.1)",
-              borderRadius: 8,
-              padding: "7px 14px",
-              fontSize: 12,
-              color: "rgba(255,255,255,0.6)",
-              cursor: "pointer",
-              marginBottom: 4,
-              display: "inline-flex",
-              alignItems: "center",
-            }}
-          >
-            <Download size={13} />
-            Download Report
-          </button>
-          <button
-            onClick={handleRescan}
-            className="flex items-center hover:opacity-80 transition-opacity"
-            style={{
-              gap: 6,
-              background: "transparent",
-              border: "0.5px solid rgba(255,255,255,0.08)",
-              borderRadius: 8,
-              padding: "7px 14px",
-              fontSize: 12,
-              color: "rgba(255,255,255,0.3)",
-              cursor: "pointer",
-              marginBottom: 4,
-              marginLeft: 8,
-              display: "inline-flex",
-              alignItems: "center",
-            }}
-          >
-            <RefreshCw size={13} />
-            Re-analyse
-          </button>
-        </div>
-
-        {/* Risk score */}
+        {/* Risk score with radial glow */}
         <div className="flex flex-col" style={{ gap: 6 }}>
-          <div className="flex items-end" style={{ gap: 10 }}>
-            <span style={{ fontSize: 72, fontWeight: 700, color, lineHeight: 1, letterSpacing: "-0.04em" }}>
+          <div style={{ position: "relative", display: "inline-flex", alignItems: "flex-end", gap: 10 }}>
+            {/* Radial glow behind score number */}
+            <div
+              style={{
+                position: "absolute",
+                left: -20, top: "50%",
+                transform: "translateY(-50%)",
+                width: 160, height: 160,
+                borderRadius: "50%",
+                background: `radial-gradient(circle, ${color}28 0%, transparent 70%)`,
+                pointerEvents: "none",
+                zIndex: 0,
+              }}
+            />
+            <span style={{ fontSize: 96, fontWeight: 700, color, lineHeight: 1, letterSpacing: "-0.05em", position: "relative", zIndex: 1 }}>
               {displayScore}
             </span>
-            <div className="flex flex-col items-start" style={{ paddingBottom: 8, gap: 4 }}>
+            <div className="flex flex-col items-start" style={{ paddingBottom: 12, gap: 4, position: "relative", zIndex: 1 }}>
               <span
                 style={{
                   fontSize: 22, fontWeight: 700, color,
@@ -793,9 +792,9 @@ export function RiskPanel({
         </div>
 
         {/* Executive summary */}
-        <div style={{ background: "rgba(255,255,255,0.03)", border: "0.5px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: "14px 16px" }}>
-          <p style={{ fontSize: 10, fontWeight: 500, letterSpacing: "0.08em", textTransform: "uppercase", color: "#6366f1", marginBottom: 6 }}>
-            Summary
+        <div style={{ background: "rgba(255,255,255,0.03)", border: "0.5px solid rgba(255,255,255,0.08)", borderRadius: 14, padding: "14px 16px" }}>
+          <p style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: "#5b4fff", marginBottom: 6 }}>
+            Analysis Summary
           </p>
           <p style={{ fontSize: 13, color: "rgba(255,255,255,0.7)", lineHeight: 1.6 }}>
             {scan.summary}
@@ -816,9 +815,10 @@ export function RiskPanel({
                   style={{
                     fontSize: 11, padding: "4px 10px", borderRadius: 9999,
                     border: "none", cursor: "pointer", transition: "all 0.15s",
-                    background: active ? "#4f46e5" : "rgba(255,255,255,0.05)",
+                    background: active ? "#5b4fff" : "rgba(255,255,255,0.05)",
                     color: active ? "#ffffff" : "rgba(255,255,255,0.4)",
                     fontWeight: active ? 500 : 400,
+                    fontFamily: "inherit",
                   }}
                 >
                   {cat === "all" ? "All" : categoryLabel(cat)} ({count})
@@ -840,10 +840,11 @@ export function RiskPanel({
                   style={{
                     fontSize: 11, padding: "4px 10px", borderRadius: 9999,
                     cursor: "pointer", transition: "all 0.15s",
-                    background: active ? sev === "all" ? "#4f46e5" : `${sevCol}33` : "rgba(255,255,255,0.05)",
+                    background: active ? sev === "all" ? "#5b4fff" : `${sevCol}33` : "rgba(255,255,255,0.05)",
                     color: active ? sev === "all" ? "#ffffff" : sevCol! : "rgba(255,255,255,0.4)",
                     border: active && sev !== "all" ? `0.5px solid ${sevCol}66` : "none",
                     fontWeight: active ? 500 : 400,
+                    fontFamily: "inherit",
                   }}
                 >
                   {sev === "all" ? "All" : sev.charAt(0).toUpperCase() + sev.slice(1)} ({count})
@@ -867,7 +868,7 @@ export function RiskPanel({
               <br />
               <button
                 onClick={() => { setActiveCategory("all"); setActiveSeverity("all"); }}
-                style={{ marginTop: 8, fontSize: 12, color: "#818cf8", background: "none", border: "none", cursor: "pointer", textDecoration: "underline" }}
+                style={{ marginTop: 8, fontSize: 12, color: "#818cf8", background: "none", border: "none", cursor: "pointer", textDecoration: "underline", fontFamily: "inherit" }}
               >
                 Clear filters
               </button>
@@ -888,6 +889,85 @@ export function RiskPanel({
             ))
           )}
         </div>
+      </div>
+
+      {/* Sticky action buttons */}
+      <div
+        style={{
+          position: "sticky", bottom: 0,
+          background: "rgba(6,6,9,0.95)", backdropFilter: "blur(12px)",
+          borderTop: "0.5px solid rgba(255,255,255,0.06)",
+          padding: "12px 0",
+          display: "flex", alignItems: "center", gap: 8,
+          marginLeft: -24, marginRight: -24, paddingLeft: 24, paddingRight: 24,
+        }}
+      >
+        {/* Download PDF */}
+        <button
+          onClick={() => exportScanReport(scan, contractTitle)}
+          style={{
+            flex: 1, height: 40,
+            background: "rgba(255,255,255,0.04)",
+            border: "0.5px solid rgba(255,255,255,0.12)",
+            borderRadius: 10,
+            fontSize: 12.5, fontWeight: 500,
+            color: "rgba(255,255,255,0.6)",
+            cursor: "pointer",
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+            transition: "all 0.15s",
+            fontFamily: "inherit",
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = "#fff"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.04)"; e.currentTarget.style.color = "rgba(255,255,255,0.6)"; }}
+        >
+          <Download size={13} />
+          Download PDF
+        </button>
+
+        {/* Download .docx (coming soon) */}
+        <button
+          disabled
+          title="Coming soon"
+          style={{
+            flex: 1, height: 40,
+            background: "rgba(255,255,255,0.04)",
+            border: "0.5px solid rgba(255,255,255,0.12)",
+            borderRadius: 10,
+            fontSize: 12.5, fontWeight: 500,
+            color: "rgba(255,255,255,0.6)",
+            cursor: "not-allowed",
+            opacity: 0.4,
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+            fontFamily: "inherit",
+          }}
+        >
+          <Download size={13} />
+          Download .docx
+        </button>
+
+        {/* Re-analyse */}
+        <button
+          onClick={handleRescan}
+          style={{
+            background: "none",
+            border: "none",
+            borderRadius: 8,
+            padding: "0 10px",
+            height: 40,
+            fontSize: 12, fontWeight: 500,
+            color: "rgba(255,255,255,0.3)",
+            cursor: "pointer",
+            display: "flex", alignItems: "center", gap: 5,
+            transition: "color 0.15s",
+            fontFamily: "inherit",
+            flexShrink: 0,
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.7)"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.3)"; }}
+        >
+          <RefreshCw size={12} />
+          Re-analyse
+        </button>
       </div>
     </>
   );
