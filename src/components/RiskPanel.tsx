@@ -1,7 +1,7 @@
 "use client";
 
 import { useReducer, useState, useEffect, useRef } from "react";
-import { ShieldCheck, Copy, Check, Download, RefreshCw, ScanLine, Lock, FileWarning, Clock, Zap } from "lucide-react";
+import { Copy, Check, Download, RefreshCw, ScanLine, Lock, FileWarning, Clock, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { exportScanReport } from "@/lib/export-pdf";
@@ -38,29 +38,43 @@ function reducer(_prev: ScanState, next: ScanState): ScanState {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function scoreColor(score: number) {
-  if (score <= 29) return "#34c759";
-  if (score <= 69) return "#ff9500";
-  return "#ff4d4d";
+  if (score >= 70) return "#F05252";
+  if (score >= 40) return "#F6A609";
+  return "#22C97B";
 }
 
 function scoreGrade(score: number) {
-  if (score <= 20) return "A";
-  if (score <= 40) return "B";
-  if (score <= 60) return "C";
-  if (score <= 80) return "D";
-  return "F";
+  if (score >= 80) return "F";
+  if (score >= 65) return "D";
+  if (score >= 50) return "C";
+  if (score >= 35) return "B";
+  return "A";
+}
+
+function gradeColor(score: number) {
+  if (score >= 80) return "#F05252";
+  if (score >= 65) return "#F97316";
+  if (score >= 50) return "#F6A609";
+  if (score >= 35) return "#84CC16";
+  return "#22C97B";
 }
 
 function severityColor(s: string) {
-  if (s === "high") return "#ff4d4d";
-  if (s === "medium") return "#ff9500";
-  return "#34c759";
+  if (s === "high") return "#F05252";
+  if (s === "medium") return "#F6A609";
+  return "#22C97B";
 }
 
 function severityBg(s: string) {
-  if (s === "high") return "rgba(255,77,77,0.1)";
-  if (s === "medium") return "rgba(255,149,0,0.1)";
-  return "rgba(52,199,89,0.1)";
+  if (s === "high") return "rgba(240,82,82,0.08)";
+  if (s === "medium") return "rgba(246,166,9,0.08)";
+  return "rgba(34,201,123,0.08)";
+}
+
+function severityBorder(s: string) {
+  if (s === "high") return "rgba(240,82,82,0.22)";
+  if (s === "medium") return "rgba(246,166,9,0.22)";
+  return "rgba(34,201,123,0.22)";
 }
 
 function categoryLabel(cat: string) {
@@ -94,7 +108,53 @@ function findClausePage(clauseText: string, pageTexts: string[]): number {
 const CATEGORY_KEYS = ["all", "payment_terms", "liability", "auto_renewal", "IP", "termination", "other"] as const;
 const SEVERITY_KEYS = ["all", "high", "medium", "low"] as const;
 
-// ── Sub-components ────────────────────────────────────────────────────────────
+// ── RiskGauge ─────────────────────────────────────────────────────────────────
+
+function RiskGauge({ score }: { score: number }) {
+  const r = 46, cx = 65, cy = 65, size = 130;
+  const circ = 2 * Math.PI * r;
+  const arc = circ * 0.75;
+  const filled = arc * (score / 100);
+  const color = scoreColor(score);
+  const grade = scoreGrade(score);
+  const gColor = gradeColor(score);
+
+  return (
+    <div style={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
+      <svg width={size} height={size} viewBox="0 0 130 130">
+        <circle cx={cx} cy={cy} r={r} fill="none"
+          stroke="rgba(255,255,255,0.07)" strokeWidth="9"
+          strokeDasharray={`${arc} ${circ - arc}`} strokeLinecap="round"
+          transform={`rotate(135 ${cx} ${cy})`} />
+        <circle cx={cx} cy={cy} r={r} fill="none"
+          stroke={color} strokeWidth="9"
+          strokeDasharray={`${filled} ${circ - filled}`} strokeLinecap="round"
+          transform={`rotate(135 ${cx} ${cy})`}
+          style={{ filter: `drop-shadow(0 0 10px ${color}99)`, transition: "stroke-dasharray 1s ease" }} />
+        <text x={cx} y={cy - 2} textAnchor="middle" fill="white"
+          fontSize="30" fontWeight="700"
+          fontFamily={"'DM Mono',monospace" as string} letterSpacing="-1">
+          {score}
+        </text>
+        <text x={cx} y={cy + 16} textAnchor="middle"
+          fill="rgba(255,255,255,.38)" fontSize="11"
+          fontFamily={"'Plus Jakarta Sans',sans-serif" as string}>
+          out of 100
+        </text>
+      </svg>
+      <div style={{
+        position: "absolute", bottom: 6, right: 6,
+        width: 32, height: 32, borderRadius: "50%",
+        background: gColor + "1A", border: `1.5px solid ${gColor}50`,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        fontFamily: "'DM Mono',monospace", fontWeight: 700,
+        fontSize: 14, color: gColor,
+      }}>{grade}</div>
+    </div>
+  );
+}
+
+// ── CopyButton ────────────────────────────────────────────────────────────────
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
@@ -119,15 +179,11 @@ function CopyButton({ text }: { text: string }) {
   return (
     <button
       onClick={handleCopy}
-      className="flex items-center gap-1 hover:opacity-80 transition-opacity flex-shrink-0"
+      className="btn btn-ghost btn-sm btn-icon"
       style={{
-        background: "transparent",
-        border: "0.5px solid rgba(255,255,255,0.08)",
-        borderRadius: 6,
-        padding: "3px 8px",
-        fontSize: 11,
-        color: copied ? "#34c759" : "rgba(255,255,255,0.3)",
-        cursor: "pointer",
+        fontSize: 11, padding: "3px 8px",
+        color: copied ? "#22C97B" : "var(--tx-secondary)",
+        gap: 4,
       }}
     >
       {copied ? <Check size={10} /> : <Copy size={10} />}
@@ -135,6 +191,8 @@ function CopyButton({ text }: { text: string }) {
     </button>
   );
 }
+
+// ── ClauseCard ────────────────────────────────────────────────────────────────
 
 interface ClauseCardProps {
   clause: Clause;
@@ -145,101 +203,97 @@ interface ClauseCardProps {
 
 function ClauseCard({ clause, isActive, targetPage, onClick }: ClauseCardProps) {
   const [expanded, setExpanded] = useState(false);
-  const [hovered, setHovered] = useState(false);
   const isLong = clause.text.length > 200;
+  const sColor = severityColor(clause.severity);
+  const sBg = severityBg(clause.severity);
+  const sBd = severityBorder(clause.severity);
 
   return (
     <div
       onClick={onClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
+      className="card"
       style={{
-        background: isActive
-          ? "rgba(91,79,255,0.08)"
-          : hovered
-          ? "rgba(255,255,255,0.04)"
-          : "rgba(255,255,255,0.02)",
-        borderTop: isActive ? "0.5px solid rgba(91,79,255,0.5)" : "0.5px solid rgba(255,255,255,0.06)",
-        borderRight: isActive ? "0.5px solid rgba(91,79,255,0.5)" : "0.5px solid rgba(255,255,255,0.06)",
-        borderBottom: isActive ? "0.5px solid rgba(91,79,255,0.5)" : "0.5px solid rgba(255,255,255,0.06)",
-        borderLeft: `3px solid ${severityColor(clause.severity)}`,
-        borderRadius: 12,
-        padding: 14,
-        marginBottom: 8,
+        borderLeft: `3px solid ${sColor}`,
+        background: isActive ? sBg : "var(--bg-card)",
         cursor: "pointer",
-        transition: "background 0.15s, border-color 0.15s",
+        transition: "background .15s, border-color .15s",
+        marginBottom: 8,
+        overflow: "hidden",
       }}
     >
-      <div className="flex items-center justify-between" style={{ marginBottom: 8 }}>
-        <span
-          style={{
-            background: severityBg(clause.severity),
-            color: severityColor(clause.severity),
-            border: `0.5px solid ${severityColor(clause.severity)}40`,
-            fontSize: 10,
-            fontWeight: 600,
-            borderRadius: 5,
-            padding: "2px 8px",
-            textTransform: "uppercase",
-            letterSpacing: "0.06em",
-          }}
-        >
+      {/* Header */}
+      <div style={{ padding: "12px 14px 10px", display: "flex", alignItems: "center", gap: 8 }}>
+        <span className={`badge badge-${clause.severity}`}>
           {clause.severity}
         </span>
-        <div className="flex items-center" style={{ gap: 6 }}>
-          <span style={{ fontSize: 10.5, color: "rgba(255,255,255,0.25)" }}>
-            {categoryLabel(clause.category)}
+        <span style={{ fontSize: 11, color: "var(--tx-muted)", flex: 1 }}>
+          {categoryLabel(clause.category)}
+        </span>
+        {targetPage !== null && (
+          <span style={{ fontSize: 10.5, color: isActive ? "var(--ac)" : "var(--tx-muted)" }}>
+            p.{targetPage}
           </span>
-          {targetPage !== null && (
-            <span style={{ fontSize: 10, color: isActive ? "#818cf8" : "rgba(255,255,255,0.2)", fontWeight: isActive ? 500 : 400, transition: "color 0.15s" }}>
-              → p.{targetPage}
-            </span>
-          )}
-        </div>
+        )}
+        <svg viewBox="0 0 16 16" fill="none" width="14" height="14"
+          style={{ color: "var(--tx-muted)", transform: expanded ? "rotate(90deg)" : "none", transition: "transform .15s", flexShrink: 0 }}>
+          <path d="M6 4l4 4-4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
       </div>
 
-      <p
-        style={{
-          fontSize: 12.5,
-          color: "rgba(255,255,255,0.45)",
-          fontStyle: "italic",
-          lineHeight: 1.55,
-          marginBottom: 8,
-          overflow: "hidden",
-          display: "-webkit-box",
-          WebkitLineClamp: expanded || !isLong ? 999 : 3,
-          WebkitBoxOrient: "vertical",
-        }}
-      >
-        &ldquo;{clause.text}&rdquo;
-      </p>
-      {isLong && (
-        <button
-          onClick={(e) => { e.stopPropagation(); setExpanded((x) => !x); }}
-          style={{ background: "none", border: "none", padding: 0, fontSize: 11, color: "#5b4fff", cursor: "pointer", marginBottom: 8 }}
+      {/* Quote text */}
+      <div style={{ padding: "0 14px 12px" }}>
+        <p
+          style={{
+            fontSize: 12.5, color: "var(--tx-secondary)",
+            fontStyle: "italic", lineHeight: 1.55, marginBottom: 6,
+            overflow: "hidden",
+            display: "-webkit-box",
+            WebkitLineClamp: expanded || !isLong ? 999 : 3,
+            WebkitBoxOrient: "vertical",
+          }}
         >
-          {expanded ? "Show less" : "Show more"}
-        </button>
-      )}
-
-      <p style={{ fontSize: 13, color: "rgba(255,255,255,0.7)", lineHeight: 1.6, marginBottom: 10 }}>
-        {clause.explanation}
-      </p>
-
-      <div style={{ background: "rgba(91,79,255,0.05)", borderRadius: 8, padding: "10px 12px" }}>
-        <div className="flex items-center justify-between" style={{ marginBottom: 6 }}>
-          <span style={{ fontSize: 10, fontWeight: 500, letterSpacing: "0.08em", textTransform: "uppercase", color: "#5b4fff" }}>
-            Safer alternative
-          </span>
-          <CopyButton text={clause.rewrite} />
-        </div>
-        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.45)", fontStyle: "italic", lineHeight: 1.5 }}>
-          {clause.rewrite}
+          &ldquo;{clause.text}&rdquo;
         </p>
+        {isLong && (
+          <button
+            onClick={(e) => { e.stopPropagation(); setExpanded((x) => !x); }}
+            style={{ background: "none", border: "none", padding: 0, fontSize: 11, color: "var(--ac)", cursor: "pointer", marginBottom: 8 }}
+          >
+            {expanded ? "Show less" : "Show more"}
+          </button>
+        )}
+
+        {/* Why it's risky */}
+        <div style={{ marginBottom: 10 }}>
+          <p style={{ fontSize: 10, fontWeight: 700, color: "var(--tx-muted)", textTransform: "uppercase", letterSpacing: "0.07em", marginBottom: 5 }}>
+            Why it&apos;s risky
+          </p>
+          <p style={{ fontSize: 13, color: "var(--tx-secondary)", lineHeight: 1.6 }}>
+            {clause.explanation}
+          </p>
+        </div>
+
+        {/* Safer alternative */}
+        <div style={{
+          background: sBg, border: `1px solid ${sBd}`,
+          borderRadius: 8, padding: "10px 12px",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+            <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.07em", textTransform: "uppercase", color: sColor }}>
+              Safer alternative
+            </span>
+            <CopyButton text={clause.rewrite} />
+          </div>
+          <p style={{ fontSize: 12, color: "var(--tx-secondary)", fontStyle: "italic", lineHeight: 1.55 }}>
+            {clause.rewrite}
+          </p>
+        </div>
       </div>
     </div>
   );
 }
+
+// ── ScanningView ──────────────────────────────────────────────────────────────
 
 interface ScanningViewProps {
   statusMessage: string;
@@ -251,7 +305,8 @@ function ScanningView({ statusMessage, streamingText, chunkProgress }: ScanningV
   const [progress, setProgress] = useState(0);
   const [showSlowMsg, setShowSlowMsg] = useState(false);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const streamingTextRef = useRef<HTMLDivElement>(null);
+  const terminalRef = useRef<HTMLDivElement>(null);
+  const [termLines, setTermLines] = useState<string[]>(["Connecting to Gemini..."]);
 
   useEffect(() => {
     const jumpTimer = setTimeout(() => setProgress(30), 300);
@@ -270,66 +325,99 @@ function ScanningView({ statusMessage, streamingText, chunkProgress }: ScanningV
   }, []);
 
   useEffect(() => {
-    if (streamingTextRef.current) {
-      streamingTextRef.current.scrollTop = streamingTextRef.current.scrollHeight;
+    if (statusMessage) {
+      setTermLines((prev) => {
+        const last = prev[prev.length - 1];
+        if (last === statusMessage) return prev;
+        return [...prev, statusMessage];
+      });
     }
-  }, [streamingText]);
+  }, [statusMessage]);
+
+  useEffect(() => {
+    if (terminalRef.current) {
+      terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
+    }
+  }, [termLines, streamingText]);
+
+  const pct = chunkProgress
+    ? Math.round((chunkProgress.completed / chunkProgress.total) * 100)
+    : null;
 
   return (
-    <div className="flex flex-col" style={{ padding: "2rem 1rem", gap: 16 }}>
-      <p style={{ fontSize: 14, color: "rgba(255,255,255,0.4)", letterSpacing: "-0.01em", textAlign: "center" }}>
-        {statusMessage}
-      </p>
-      <div style={{ width: "100%", height: 3, background: "rgba(255,255,255,0.06)", borderRadius: 9999 }}>
-        <div
-          className="transition-all duration-300"
-          style={{ width: `${progress}%`, height: 3, background: "#5b4fff", borderRadius: 9999 }}
-        />
-      </div>
-      {chunkProgress ? (
-        <div style={{ marginTop: 4 }}>
-          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.3)", marginBottom: 4, fontFamily: "monospace" }}>
-            {chunkProgress.completed} / {chunkProgress.total} sections
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {/* Terminal box */}
+      <div
+        ref={terminalRef}
+        style={{
+          background: "#0A0A0A",
+          border: "1px solid var(--bd-subtle)",
+          borderRadius: "var(--r-md)",
+          padding: "16px 18px",
+          fontFamily: "var(--ff-mono)",
+          fontSize: 12.5, lineHeight: 1.7,
+          minHeight: 160, maxHeight: 260,
+          overflowY: "auto",
+        }}
+      >
+        {termLines.map((line, i) => (
+          <div
+            key={i}
+            style={{
+              color: i === 0 ? "#30D158" : line.includes("Analysing") || line.includes("section") ? "var(--tx-secondary)" : "#30D158",
+              animation: `termLine .15s ease ${i * 0.05}s both`,
+            }}
+          >
+            <span style={{ color: "var(--tx-muted)", marginRight: 8 }}>▸</span>
+            {line}
           </div>
-          <div style={{ display: "flex", gap: 2, flexWrap: "wrap" }}>
+        ))}
+        {streamingText.length > 0 && (
+          <div style={{ color: "var(--ac)", marginTop: 4, wordBreak: "break-all", fontSize: 11 }}>
+            {streamingText.slice(-200)}
+          </div>
+        )}
+        {/* Blinking cursor */}
+        <div style={{ display: "inline-block", width: 8, height: 14, background: "var(--ac)", marginTop: 4, animation: "blink 1s step-end infinite", verticalAlign: "middle" }} />
+      </div>
+
+      {/* Progress */}
+      <div>
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+          <span style={{ fontFamily: "var(--ff-mono)", fontSize: 11.5, color: "var(--tx-secondary)" }}>
+            {chunkProgress ? `${chunkProgress.completed} / ${chunkProgress.total} sections` : "Analysing…"}
+          </span>
+          {pct !== null && (
+            <span style={{ fontFamily: "var(--ff-mono)", fontSize: 11.5, color: "var(--ac)" }}>
+              {pct}%
+            </span>
+          )}
+        </div>
+        <div style={{ width: "100%", height: 3, background: "rgba(255,255,255,0.07)", borderRadius: 99 }}>
+          <div style={{
+            width: `${pct ?? progress}%`, height: 3, borderRadius: 99,
+            background: "linear-gradient(90deg, var(--ac), var(--ac-lite))",
+            boxShadow: "0 0 10px var(--ac)",
+            transition: "width .12s linear",
+          }} />
+        </div>
+        {chunkProgress && (
+          <div style={{ display: "flex", gap: 2, flexWrap: "wrap", marginTop: 8 }}>
             {Array.from({ length: chunkProgress.total }).map((_, i) => (
               <div key={i} style={{
                 width: 12, height: 4, borderRadius: 2,
-                background: i < chunkProgress.completed ? "#5b4fff" : "rgba(255,255,255,0.08)",
+                background: i < chunkProgress.completed ? "var(--ac)" : "rgba(255,255,255,0.08)",
                 transition: "background 0.2s",
               }} />
             ))}
           </div>
-        </div>
-      ) : showSlowMsg ? (
-        <p style={{ fontSize: 12, color: "rgba(255,255,255,0.25)", textAlign: "center" }}>
-          Still working — this contract may be complex…
-        </p>
-      ) : null}
-      {streamingText.length > 0 && (
-        <div>
-          <p style={{ fontSize: 10, fontWeight: 500, letterSpacing: "0.08em", textTransform: "uppercase", color: "#818cf8", marginBottom: 6 }}>
-            Gemini is thinking...
+        )}
+        {showSlowMsg && !chunkProgress && (
+          <p style={{ fontSize: 12, color: "var(--tx-muted)", textAlign: "center", marginTop: 8 }}>
+            Still working — this contract may be complex…
           </p>
-          <div
-            ref={streamingTextRef}
-            style={{
-              background: "rgba(0,0,0,0.3)",
-              border: "0.5px solid rgba(255,255,255,0.06)",
-              borderRadius: 10,
-              padding: "12px 14px",
-              fontFamily: "'Courier New', monospace",
-              fontSize: 11,
-              color: "rgba(255,255,255,0.35)",
-              maxHeight: 180,
-              overflowY: "auto",
-              wordBreak: "break-all",
-            }}
-          >
-            {streamingText}
-          </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
@@ -338,16 +426,16 @@ function ScanningView({ statusMessage, streamingText, chunkProgress }: ScanningV
 
 export function RiskPanelSkeleton() {
   return (
-    <div style={{ padding: "1.5rem", display: "flex", flexDirection: "column", gap: 12 }}>
-      <Skeleton style={{ height: 120, borderRadius: 14 }} />
-      <Skeleton style={{ height: 80, borderRadius: 12 }} />
+    <div style={{ padding: "18px 22px", display: "flex", flexDirection: "column", gap: 12 }}>
+      <Skeleton style={{ height: 130, borderRadius: "var(--r-lg)" }} />
+      <Skeleton style={{ height: 80, borderRadius: "var(--r-md)" }} />
       <div style={{ display: "flex", gap: 6 }}>
         {[80, 100, 90, 110].map((w, i) => (
-          <Skeleton key={i} style={{ width: w, height: 28, borderRadius: 9999 }} />
+          <Skeleton key={i} style={{ width: w, height: 30, borderRadius: 99 }} />
         ))}
       </div>
       {[1, 2, 3].map((i) => (
-        <Skeleton key={i} style={{ height: 110, borderRadius: 12 }} />
+        <Skeleton key={i} style={{ height: 110, borderRadius: "var(--r-md)" }} />
       ))}
     </div>
   );
@@ -365,6 +453,8 @@ interface RiskPanelProps {
   onClauseClick?: (page: number) => void;
   onScanStart?: () => void;
   onScanEnd?: () => void;
+  onScanComplete?: (scan: ScanResult) => void;
+  onRegisterRescan?: (fn: () => void) => void;
 }
 
 export function RiskPanel({
@@ -377,6 +467,8 @@ export function RiskPanel({
   onClauseClick,
   onScanStart,
   onScanEnd,
+  onScanComplete,
+  onRegisterRescan,
 }: RiskPanelProps) {
   const [state, dispatch] = useReducer(
     reducer,
@@ -390,7 +482,6 @@ export function RiskPanel({
   const [activeCategory, setActiveCategory] = useState<string>("all");
   const [activeSeverity, setActiveSeverity] = useState<string>("all");
   const [activeClauseIndex, setActiveClauseIndex] = useState<number | null>(null);
-  const [displayScore, setDisplayScore] = useState(0);
   const [scanStatusMessage, setScanStatusMessage] = useState("Connecting to Gemini...");
   const [streamingText, setStreamingText] = useState("");
   const [chunkProgress, setChunkProgress] = useState<{ completed: number; total: number } | null>(null);
@@ -399,23 +490,6 @@ export function RiskPanel({
     setActiveSeverity("all");
     setActiveClauseIndex(null);
   }, [activeCategory]);
-
-  useEffect(() => {
-    if (state.status !== "done") return;
-    const target = state.scan.risk_score;
-    if (displayScore === target) return;
-    const duration = 1000;
-    const steps = 40;
-    const increment = target / steps;
-    let current = 0;
-    const timer = setInterval(() => {
-      current += increment;
-      if (current >= target) { setDisplayScore(target); clearInterval(timer); }
-      else setDisplayScore(Math.round(current));
-    }, duration / steps);
-    return () => clearInterval(timer);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.status]);
 
   // ── Core SSE fetch ────────────────────────────────────────────────────────────
   async function runScan() {
@@ -475,10 +549,10 @@ export function RiskPanel({
                   clearTimeout(clientTimeout);
                   dispatch({ status: "done", scan: payload.scan });
                   onScanEnd?.();
+                  onScanComplete?.(payload.scan);
                   toast.success("Analysis complete", {
                     description: `Risk score: ${payload.scan.risk_score}/100`,
                   });
-                  // Fire-and-forget email
                   fetch("/api/send-report", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
@@ -538,7 +612,6 @@ export function RiskPanel({
 
       if (!resetRes.ok) {
         const resetData = await resetRes.json();
-        // 409 means a scan is already running — just show scanning state
         if (resetRes.status === 409) {
           dispatch({ status: "scanning" });
           onScanStart?.();
@@ -552,67 +625,53 @@ export function RiskPanel({
       return;
     }
 
-    // Small delay to ensure the DB write has propagated before scan-stream reads status
     await new Promise((resolve) => setTimeout(resolve, 300));
-
     dispatch({ status: "scanning" });
     onScanStart?.();
     await runScan();
   }
 
+  // Register rescan with parent
+  const handleRescanRef = useRef(handleRescan);
+  useEffect(() => { handleRescanRef.current = handleRescan; });
+  useEffect(() => {
+    onRegisterRescan?.(() => handleRescanRef.current());
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ── Idle ──
   if (state.status === "idle") {
     return (
-      <div
-        className="flex flex-col items-center text-center"
-        style={{
-          background: "rgba(255,255,255,0.025)",
-          border: "0.5px solid rgba(255,255,255,0.07)",
-          borderRadius: 16,
-          padding: "2.5rem 1.5rem",
-          gap: 14,
-        }}
-      >
-        <div
-          className="glow-pulse"
-          style={{
-            width: 60, height: 60, borderRadius: "50%",
-            background: "rgba(91,79,255,0.12)",
-            border: "0.5px solid rgba(91,79,255,0.25)",
-            display: "flex", alignItems: "center", justifyContent: "center",
-          }}
-        >
-          <ShieldCheck size={28} color="#818cf8" strokeWidth={1.5} />
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", textAlign: "center", flex: 1, justifyContent: "center", gap: 14, padding: "40px 0" }}>
+        <div style={{ animation: "floatUp 4s ease-in-out infinite", marginBottom: 4 }}>
+          <svg width={52} height={Math.round(52 * 1.17)} viewBox="0 0 24 28" fill="none">
+            <defs>
+              <linearGradient id="shield-idle" x1="2" y1="1" x2="22" y2="27" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stopColor="#FFD080"/>
+                <stop offset="100%" stopColor="#FF9500"/>
+              </linearGradient>
+            </defs>
+            <path d="M12 1L2 5.5V13c0 6.35 4.5 12.28 10 13.88C17.5 25.28 22 19.35 22 13V5.5L12 1z"
+              fill="url(#shield-idle)" fillOpacity=".18" stroke="url(#shield-idle)" strokeWidth="1.4" strokeLinejoin="round"/>
+            <line x1="7.5" y1="12" x2="16.5" y2="12" stroke="url(#shield-idle)" strokeWidth="1.5" strokeLinecap="round" opacity=".95"/>
+            <line x1="7.5" y1="15.8" x2="14.2" y2="15.8" stroke="url(#shield-idle)" strokeWidth="1.5" strokeLinecap="round" opacity=".7"/>
+          </svg>
         </div>
         <div>
-          <h3 style={{ fontSize: 24, fontWeight: 600, color: "#ffffff", marginBottom: 8, letterSpacing: "-0.02em" }}>
-            Ready to Analyse
+          <h3 style={{ fontFamily: "var(--ff-display)", fontWeight: 700, fontSize: 20, color: "var(--tx-primary)", marginBottom: 8, letterSpacing: "-0.02em" }}>
+            Ready to analyse
           </h3>
-          <p style={{ fontSize: 13, color: "rgba(255,255,255,0.3)", lineHeight: 1.6 }}>
-            This contract hasn&apos;t been scanned yet. Click below to identify risky clauses.
+          <p style={{ fontSize: 13.5, color: "var(--tx-secondary)", lineHeight: 1.65, maxWidth: 300 }}>
+            This contract hasn&apos;t been scanned yet. Click below to identify risky clauses using Gemini AI.
           </p>
         </div>
         <button
           onClick={startScan}
-          style={{
-            width: "100%",
-            height: 52,
-            background: "linear-gradient(135deg, #5b4fff, #7c3aed)",
-            color: "white",
-            border: "none",
-            borderRadius: 14,
-            fontSize: 15,
-            fontWeight: 600,
-            letterSpacing: "-0.01em",
-            cursor: "pointer",
-            boxShadow: "0 4px 20px rgba(91,79,255,0.4)",
-            display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-            marginTop: 4,
-            fontFamily: "inherit",
-          }}
+          className="btn btn-primary"
+          style={{ maxWidth: 280, width: "100%", justifyContent: "center", marginTop: 8 }}
         >
-          <Zap size={17} />
-          Analyse contract
+          <Zap size={15} />
+          Analyse Contract
         </button>
       </div>
     );
@@ -620,7 +679,13 @@ export function RiskPanel({
 
   // ── Scanning ──
   if (state.status === "scanning") {
-    return <ScanningView statusMessage={scanStatusMessage} streamingText={streamingText} chunkProgress={chunkProgress} />;
+    return (
+      <ScanningView
+        statusMessage={scanStatusMessage}
+        streamingText={streamingText}
+        chunkProgress={chunkProgress}
+      />
+    );
   }
 
   // ── Error ──
@@ -633,17 +698,17 @@ export function RiskPanel({
 
     if (isScanned) {
       return (
-        <div style={{ background: "rgba(255,149,0,0.06)", border: "0.5px solid rgba(255,149,0,0.25)", borderRadius: 12, padding: "1.25rem" }}>
-          <div className="flex items-center" style={{ gap: 8, marginBottom: 8 }}>
-            <ScanLine size={16} color="#ff9500" />
-            <p style={{ fontSize: 13, fontWeight: 500, color: "#ff9500", margin: 0 }}>Scanned PDF detected</p>
+        <div style={{ background: "rgba(246,166,9,0.06)", border: "1px solid rgba(246,166,9,0.22)", borderRadius: "var(--r-md)", padding: "16px 18px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <ScanLine size={16} color="#F6A609" />
+            <p style={{ fontSize: 13, fontWeight: 600, color: "#F6A609", margin: 0 }}>Scanned PDF detected</p>
           </div>
-          <p style={{ fontSize: 12.5, color: "rgba(255,180,80,0.7)", lineHeight: 1.6, marginBottom: 12, whiteSpace: "pre-line" }}>
+          <p style={{ fontSize: 12.5, color: "var(--tx-secondary)", lineHeight: 1.6, marginBottom: 12, whiteSpace: "pre-line" }}>
             {"This PDF contains scanned images rather than selectable text.\n\nTo fix this:\n• Adobe Acrobat → Tools → Enhance Scans → Recognize Text\n• Free OCR: "}
-            <a href="https://smallpdf.com/pdf-to-word" target="_blank" rel="noopener noreferrer" style={{ color: "#ff9500" }}>smallpdf.com/pdf-to-word</a>
+            <a href="https://smallpdf.com/pdf-to-word" target="_blank" rel="noopener noreferrer" style={{ color: "var(--ac)" }}>smallpdf.com/pdf-to-word</a>
             {"\n• Or export as PDF directly from Word / Google Docs"}
           </p>
-          <button onClick={() => dispatch({ status: "idle" })} style={{ fontSize: 12, color: "#818cf8", background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline" }}>
+          <button onClick={() => dispatch({ status: "idle" })} style={{ fontSize: 12, color: "var(--ac)", background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline" }}>
             Upload a different file
           </button>
         </div>
@@ -652,17 +717,17 @@ export function RiskPanel({
 
     if (isPassword) {
       return (
-        <div style={{ background: "rgba(255,149,0,0.06)", border: "0.5px solid rgba(255,149,0,0.25)", borderRadius: 12, padding: "1.25rem" }}>
-          <div className="flex items-center" style={{ gap: 8, marginBottom: 8 }}>
-            <Lock size={16} color="#ff9500" />
-            <p style={{ fontSize: 13, fontWeight: 500, color: "#ff9500", margin: 0 }}>Password-protected PDF</p>
+        <div style={{ background: "rgba(246,166,9,0.06)", border: "1px solid rgba(246,166,9,0.22)", borderRadius: "var(--r-md)", padding: "16px 18px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <Lock size={16} color="#F6A609" />
+            <p style={{ fontSize: 13, fontWeight: 600, color: "#F6A609", margin: 0 }}>Password-protected PDF</p>
           </div>
-          <p style={{ fontSize: 12.5, color: "rgba(255,180,80,0.7)", lineHeight: 1.6, marginBottom: 12 }}>
-            {"To remove the password:\n• Adobe Acrobat: File → Properties → Security → Change to \"No Security\"\n• Online (free): "}
-            <a href="https://smallpdf.com/unlock-pdf" target="_blank" rel="noopener noreferrer" style={{ color: "#ff9500" }}>smallpdf.com/unlock-pdf</a>
+          <p style={{ fontSize: 12.5, color: "var(--tx-secondary)", lineHeight: 1.6, marginBottom: 12 }}>
+            {"To remove the password:\n• Adobe Acrobat: File → Properties → Security → \"No Security\"\n• Online (free): "}
+            <a href="https://smallpdf.com/unlock-pdf" target="_blank" rel="noopener noreferrer" style={{ color: "var(--ac)" }}>smallpdf.com/unlock-pdf</a>
             {"\n• Google Chrome: Open PDF → Print → Save as PDF"}
           </p>
-          <button onClick={() => dispatch({ status: "idle" })} style={{ fontSize: 12, color: "#818cf8", background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline" }}>
+          <button onClick={() => dispatch({ status: "idle" })} style={{ fontSize: 12, color: "var(--ac)", background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline" }}>
             Upload unlocked file
           </button>
         </div>
@@ -671,15 +736,15 @@ export function RiskPanel({
 
     if (isComplex) {
       return (
-        <div style={{ background: "rgba(91,79,255,0.06)", border: "0.5px solid rgba(91,79,255,0.25)", borderRadius: 12, padding: "1.25rem" }}>
-          <div className="flex items-center" style={{ gap: 8, marginBottom: 8 }}>
-            <FileWarning size={16} color="#818cf8" />
-            <p style={{ fontSize: 13, fontWeight: 500, color: "#818cf8", margin: 0 }}>Document too complex to parse</p>
+        <div style={{ background: "rgba(255,255,255,0.04)", border: "1px solid var(--bd-default)", borderRadius: "var(--r-md)", padding: "16px 18px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <FileWarning size={16} color="var(--tx-secondary)" />
+            <p style={{ fontSize: 13, fontWeight: 600, color: "var(--tx-primary)", margin: 0 }}>Document too complex</p>
           </div>
-          <p style={{ fontSize: 12.5, color: "rgba(180,180,255,0.6)", lineHeight: 1.6, marginBottom: 12 }}>
+          <p style={{ fontSize: 12.5, color: "var(--tx-secondary)", lineHeight: 1.6, marginBottom: 12 }}>
             Try uploading just the main agreement pages without annexes and form templates.
           </p>
-          <button onClick={() => dispatch({ status: "idle" })} style={{ fontSize: 12, color: "#818cf8", background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline" }}>
+          <button onClick={() => dispatch({ status: "idle" })} style={{ fontSize: 12, color: "var(--ac)", background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline" }}>
             Try again
           </button>
         </div>
@@ -688,15 +753,15 @@ export function RiskPanel({
 
     if (isTimeout) {
       return (
-        <div style={{ background: "rgba(255,77,77,0.06)", border: "0.5px solid rgba(255,77,77,0.25)", borderRadius: 12, padding: "1.25rem" }}>
-          <div className="flex items-center" style={{ gap: 8, marginBottom: 8 }}>
-            <Clock size={16} color="#ff4d4d" />
-            <p style={{ fontSize: 13, fontWeight: 500, color: "#ff4d4d", margin: 0 }}>Analysis timed out</p>
+        <div style={{ background: "var(--rh-bg)", border: "1px solid var(--rh-bd)", borderRadius: "var(--r-md)", padding: "16px 18px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <Clock size={16} color="var(--rh)" />
+            <p style={{ fontSize: 13, fontWeight: 600, color: "var(--rh)", margin: 0 }}>Analysis timed out</p>
           </div>
-          <p style={{ fontSize: 12.5, color: "rgba(255,120,120,0.7)", lineHeight: 1.6, marginBottom: 12 }}>
-            This contract is taking longer than expected. Please try again — Gemini processes faster on retry.
+          <p style={{ fontSize: 12.5, color: "var(--tx-secondary)", lineHeight: 1.6, marginBottom: 12 }}>
+            This contract is taking longer than expected. Please try again.
           </p>
-          <button onClick={() => dispatch({ status: "idle" })} style={{ fontSize: 12, color: "#818cf8", background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline" }}>
+          <button onClick={() => dispatch({ status: "idle" })} style={{ fontSize: 12, color: "var(--ac)", background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline" }}>
             Try again
           </button>
         </div>
@@ -704,10 +769,10 @@ export function RiskPanel({
     }
 
     return (
-      <div style={{ background: "rgba(255,77,77,0.08)", border: "0.5px solid rgba(255,77,77,0.25)", borderRadius: 12, padding: "1.25rem" }}>
-        <p style={{ fontSize: 13, fontWeight: 500, color: "#ff4d4d", marginBottom: 6 }}>Analysis failed</p>
-        <p style={{ fontSize: 12.5, color: "rgba(255,120,120,0.7)", lineHeight: 1.5, marginBottom: 12 }}>{state.message}</p>
-        <button onClick={() => dispatch({ status: "idle" })} style={{ fontSize: 12, color: "#818cf8", background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline" }}>
+      <div style={{ background: "var(--rh-bg)", border: "1px solid var(--rh-bd)", borderRadius: "var(--r-md)", padding: "16px 18px" }}>
+        <p style={{ fontSize: 13, fontWeight: 600, color: "var(--rh)", marginBottom: 6 }}>Analysis failed</p>
+        <p style={{ fontSize: 12.5, color: "var(--tx-secondary)", lineHeight: 1.5, marginBottom: 12 }}>{state.message}</p>
+        <button onClick={() => dispatch({ status: "idle" })} style={{ fontSize: 12, color: "var(--ac)", background: "none", border: "none", padding: 0, cursor: "pointer", textDecoration: "underline" }}>
           Try again
         </button>
       </div>
@@ -716,8 +781,6 @@ export function RiskPanel({
 
   // ── Done ──
   const { scan } = state;
-  const color = scoreColor(scan.risk_score);
-  const grade = scoreGrade(scan.risk_score);
 
   const categoryCounts = scan.clauses.reduce((acc, c) => {
     acc[c.category] = (acc[c.category] ?? 0) + 1;
@@ -744,231 +807,133 @@ export function RiskPanel({
   );
 
   return (
-    <>
-      <div className="flex flex-col" style={{ gap: 14, paddingBottom: 80 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
 
-        {/* Risk score with radial glow */}
-        <div className="flex flex-col" style={{ gap: 6 }}>
-          <div style={{ position: "relative", display: "inline-flex", alignItems: "flex-end", gap: 10 }}>
-            {/* Radial glow behind score number */}
-            <div
-              style={{
-                position: "absolute",
-                left: -20, top: "50%",
-                transform: "translateY(-50%)",
-                width: 160, height: 160,
-                borderRadius: "50%",
-                background: `radial-gradient(circle, ${color}28 0%, transparent 70%)`,
-                pointerEvents: "none",
-                zIndex: 0,
-              }}
-            />
-            <span style={{ fontSize: 96, fontWeight: 700, color, lineHeight: 1, letterSpacing: "-0.05em", position: "relative", zIndex: 1 }}>
-              {displayScore}
-            </span>
-            <div className="flex flex-col items-start" style={{ paddingBottom: 12, gap: 4, position: "relative", zIndex: 1 }}>
-              <span
-                style={{
-                  fontSize: 22, fontWeight: 700, color,
-                  background: `${color}18`, border: `1px solid ${color}40`,
-                  borderRadius: 8, padding: "2px 10px", lineHeight: 1.4,
-                }}
-              >
-                {grade}
-              </span>
-            </div>
-          </div>
-          <p style={{ fontSize: 10, fontWeight: 500, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(255,255,255,0.3)" }}>
-            Risk Score
-          </p>
-          <div style={{ width: "100%", height: 4, background: "rgba(255,255,255,0.06)", borderRadius: 9999, overflow: "hidden" }}>
-            <div
-              style={{
-                width: `${displayScore}%`, height: 4, borderRadius: 9999,
-                background: color, transition: "width 1s ease-out",
-              }}
-            />
-          </div>
-        </div>
-
-        {/* Executive summary */}
-        <div style={{ background: "rgba(255,255,255,0.03)", border: "0.5px solid rgba(255,255,255,0.08)", borderRadius: 14, padding: "14px 16px" }}>
-          <p style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.08em", textTransform: "uppercase", color: "#5b4fff", marginBottom: 6 }}>
-            Analysis Summary
-          </p>
-          <p style={{ fontSize: 13, color: "rgba(255,255,255,0.7)", lineHeight: 1.6 }}>
+      {/* Risk gauge card */}
+      <div className="card" style={{ padding: "18px 20px", display: "flex", gap: 20, alignItems: "flex-start" }}>
+        <RiskGauge score={scan.risk_score} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <h3 style={{ fontFamily: "var(--ff-display)", fontWeight: 700, fontSize: 14, color: "var(--tx-primary)", marginBottom: 8 }}>
+            Executive Summary
+          </h3>
+          <p style={{ fontSize: 13, color: "var(--tx-secondary)", lineHeight: 1.65, marginBottom: 12 }}>
             {scan.summary}
           </p>
-        </div>
-
-        {/* Filters */}
-        <div className="flex flex-col" style={{ gap: 6 }}>
-          <div className="flex flex-wrap" style={{ gap: 5 }}>
-            {CATEGORY_KEYS.map((cat) => {
-              const count = cat === "all" ? scan.clauses.length : (categoryCounts[cat] ?? 0);
-              if (cat !== "all" && count === 0) return null;
-              const active = activeCategory === cat;
+          {/* Clause count dots */}
+          <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
+            {(["high", "medium", "low"] as const).map((sev) => {
+              const count = scan.clauses.filter((c) => c.severity === sev).length;
+              if (count === 0) return null;
               return (
-                <button
-                  key={cat}
-                  onClick={() => setActiveCategory(cat)}
-                  style={{
-                    fontSize: 11, padding: "4px 10px", borderRadius: 9999,
-                    border: "none", cursor: "pointer", transition: "all 0.15s",
-                    background: active ? "#5b4fff" : "rgba(255,255,255,0.05)",
-                    color: active ? "#ffffff" : "rgba(255,255,255,0.4)",
-                    fontWeight: active ? 500 : 400,
-                    fontFamily: "inherit",
-                  }}
-                >
-                  {cat === "all" ? "All" : categoryLabel(cat)} ({count})
-                </button>
+                <div key={sev} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                  <div style={{ width: 8, height: 8, borderRadius: "50%", background: severityColor(sev), flexShrink: 0 }} />
+                  <span style={{ fontSize: 12, color: "var(--tx-secondary)", textTransform: "capitalize" }}>
+                    {sev} <span style={{ fontFamily: "var(--ff-mono)", fontWeight: 700, color: severityColor(sev) }}>{count}</span>
+                  </span>
+                </div>
               );
             })}
           </div>
-
-          <div className="flex flex-wrap" style={{ gap: 5 }}>
-            {SEVERITY_KEYS.map((sev) => {
-              const count = sev === "all" ? categoryFiltered.length : (severityCounts[sev] ?? 0);
-              if (sev !== "all" && count === 0) return null;
-              const active = activeSeverity === sev;
-              const sevCol = sev === "all" ? null : severityColor(sev);
-              return (
-                <button
-                  key={sev}
-                  onClick={() => setActiveSeverity(sev)}
-                  style={{
-                    fontSize: 11, padding: "4px 10px", borderRadius: 9999,
-                    cursor: "pointer", transition: "all 0.15s",
-                    background: active ? sev === "all" ? "#5b4fff" : `${sevCol}33` : "rgba(255,255,255,0.05)",
-                    color: active ? sev === "all" ? "#ffffff" : sevCol! : "rgba(255,255,255,0.4)",
-                    border: active && sev !== "all" ? `0.5px solid ${sevCol}66` : "none",
-                    fontWeight: active ? 500 : 400,
-                    fontFamily: "inherit",
-                  }}
-                >
-                  {sev === "all" ? "All" : sev.charAt(0).toUpperCase() + sev.slice(1)} ({count})
-                </button>
-              );
-            })}
-          </div>
-        </div>
-
-        {pageTexts && pageTexts.length > 0 && (
-          <p style={{ fontSize: 11, color: "rgba(255,255,255,0.25)", fontStyle: "italic", marginBottom: -6 }}>
-            Click any clause below to jump to it in the PDF
-          </p>
-        )}
-
-        {/* Clause cards */}
-        <div>
-          {filtered.length === 0 ? (
-            <div style={{ textAlign: "center", padding: "2rem 1rem", color: "rgba(255,255,255,0.2)", fontSize: 13 }}>
-              No clauses match this filter combination.
-              <br />
-              <button
-                onClick={() => { setActiveCategory("all"); setActiveSeverity("all"); }}
-                style={{ marginTop: 8, fontSize: 12, color: "#818cf8", background: "none", border: "none", cursor: "pointer", textDecoration: "underline", fontFamily: "inherit" }}
-              >
-                Clear filters
-              </button>
-            </div>
-          ) : (
-            filtered.map((clause, i) => (
-              <ClauseCard
-                key={i}
-                clause={clause}
-                isActive={activeClauseIndex === i}
-                targetPage={targetPages[i]}
-                onClick={() => {
-                  setActiveClauseIndex(i);
-                  const page = targetPages[i];
-                  if (page !== null) onClauseClick?.(page);
-                }}
-              />
-            ))
-          )}
         </div>
       </div>
 
-      {/* Sticky action buttons */}
-      <div
-        style={{
-          position: "sticky", bottom: 0,
-          background: "rgba(6,6,9,0.95)", backdropFilter: "blur(12px)",
-          borderTop: "0.5px solid rgba(255,255,255,0.06)",
-          padding: "12px 0",
-          display: "flex", alignItems: "center", gap: 8,
-          marginLeft: -24, marginRight: -24, paddingLeft: 24, paddingRight: 24,
-        }}
-      >
-        {/* Download PDF */}
+      {/* Filter tabs — categories */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+        {CATEGORY_KEYS.map((cat) => {
+          const count = cat === "all" ? scan.clauses.length : (categoryCounts[cat] ?? 0);
+          if (cat !== "all" && count === 0) return null;
+          return (
+            <button
+              key={cat}
+              onClick={() => setActiveCategory(cat)}
+              className={`tab${activeCategory === cat ? " active" : ""}`}
+            >
+              {cat === "all" ? "All" : categoryLabel(cat)} ({count})
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Filter tabs — severity */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+        {SEVERITY_KEYS.map((sev) => {
+          const count = sev === "all" ? categoryFiltered.length : (severityCounts[sev] ?? 0);
+          if (sev !== "all" && count === 0) return null;
+          return (
+            <button
+              key={sev}
+              onClick={() => setActiveSeverity(sev)}
+              className={`tab${activeSeverity === sev ? " active" : ""}`}
+            >
+              {sev === "all" ? "All" : sev.charAt(0).toUpperCase() + sev.slice(1)} ({count})
+            </button>
+          );
+        })}
+      </div>
+
+      {pageTexts && pageTexts.length > 0 && (
+        <p style={{ fontSize: 11, color: "var(--tx-muted)", fontStyle: "italic" }}>
+          Click any clause to jump to it in the PDF
+        </p>
+      )}
+
+      {/* Clause cards */}
+      <div>
+        {filtered.length === 0 ? (
+          <div style={{ textAlign: "center", padding: "32px 16px", color: "var(--tx-muted)", fontSize: 13 }}>
+            No clauses match this filter.
+            <br />
+            <button
+              onClick={() => { setActiveCategory("all"); setActiveSeverity("all"); }}
+              style={{ marginTop: 8, fontSize: 12, color: "var(--ac)", background: "none", border: "none", cursor: "pointer", textDecoration: "underline", fontFamily: "inherit" }}
+            >
+              Clear filters
+            </button>
+          </div>
+        ) : (
+          filtered.map((clause, i) => (
+            <ClauseCard
+              key={i}
+              clause={clause}
+              isActive={activeClauseIndex === i}
+              targetPage={targetPages[i]}
+              onClick={() => {
+                setActiveClauseIndex(i);
+                const page = targetPages[i];
+                if (page !== null) onClauseClick?.(page);
+              }}
+            />
+          ))
+        )}
+      </div>
+
+      {/* Action buttons */}
+      <div style={{ display: "flex", gap: 8, paddingTop: 8, borderTop: "1px solid var(--bd-subtle)" }}>
         <button
+          className="btn btn-ghost btn-sm"
           onClick={() => exportScanReport(scan, contractTitle)}
-          style={{
-            flex: 1, height: 40,
-            background: "rgba(255,255,255,0.04)",
-            border: "0.5px solid rgba(255,255,255,0.12)",
-            borderRadius: 10,
-            fontSize: 12.5, fontWeight: 500,
-            color: "rgba(255,255,255,0.6)",
-            cursor: "pointer",
-            display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-            transition: "all 0.15s",
-            fontFamily: "inherit",
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.08)"; e.currentTarget.style.color = "#fff"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = "rgba(255,255,255,0.04)"; e.currentTarget.style.color = "rgba(255,255,255,0.6)"; }}
+          style={{ flex: 1, justifyContent: "center", gap: 6 }}
         >
-          <Download size={13} />
+          <Download size={12} />
           Download PDF
         </button>
-
-        {/* Download .docx (coming soon) */}
         <button
+          className="btn btn-ghost btn-sm"
           disabled
           title="Coming soon"
-          style={{
-            flex: 1, height: 40,
-            background: "rgba(255,255,255,0.04)",
-            border: "0.5px solid rgba(255,255,255,0.12)",
-            borderRadius: 10,
-            fontSize: 12.5, fontWeight: 500,
-            color: "rgba(255,255,255,0.6)",
-            cursor: "not-allowed",
-            opacity: 0.4,
-            display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-            fontFamily: "inherit",
-          }}
+          style={{ flex: 1, justifyContent: "center", gap: 6, opacity: 0.4, cursor: "not-allowed" }}
         >
-          <Download size={13} />
           Download .docx
         </button>
-
-        {/* Re-analyse */}
         <button
+          className="btn btn-ghost btn-sm"
           onClick={handleRescan}
-          style={{
-            background: "none",
-            border: "none",
-            borderRadius: 8,
-            padding: "0 10px",
-            height: 40,
-            fontSize: 12, fontWeight: 500,
-            color: "rgba(255,255,255,0.3)",
-            cursor: "pointer",
-            display: "flex", alignItems: "center", gap: 5,
-            transition: "color 0.15s",
-            fontFamily: "inherit",
-            flexShrink: 0,
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.7)"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.3)"; }}
+          style={{ color: "var(--ac-lite)", borderColor: "rgba(255,149,0,0.25)", gap: 5 }}
         >
-          <RefreshCw size={12} />
+          <RefreshCw size={11} />
           Re-analyse
         </button>
       </div>
-    </>
+    </div>
   );
 }

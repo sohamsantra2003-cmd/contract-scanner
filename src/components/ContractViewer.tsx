@@ -2,12 +2,11 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronLeft } from "lucide-react";
 import { PDFViewer } from "@/components/PDFViewer";
 import { RiskPanel } from "@/components/RiskPanel";
 import { DeleteContractButton } from "@/components/DeleteContractButton";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
-import { ShieldCheck } from "lucide-react";
+import { exportScanReport } from "@/lib/export-pdf";
 
 type Clause = {
   text: string;
@@ -36,17 +35,19 @@ interface ContractViewerProps {
   initiallyScanning?: boolean;
 }
 
-const statusStyles: Record<string, React.CSSProperties> = {
-  pending:  { background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.4)", border: "0.5px solid rgba(255,255,255,0.1)" },
-  scanning: { background: "rgba(91,79,255,0.1)", color: "#818cf8", border: "0.5px solid rgba(91,79,255,0.2)" },
-  complete: { background: "rgba(52,199,89,0.1)", color: "#34c759", border: "0.5px solid rgba(52,199,89,0.2)" },
-  error:    { background: "rgba(255,77,77,0.1)", color: "#ff4d4d", border: "0.5px solid rgba(255,77,77,0.2)" },
+const statusBadgeStyle: Record<string, React.CSSProperties> = {
+  pending:  { background: "rgba(255,255,255,0.05)", color: "var(--tx-secondary)", border: "1px solid var(--bd-default)" },
+  scanning: { background: "rgba(255,149,0,0.08)", color: "var(--ac-lite)", border: "1px solid rgba(255,149,0,0.2)" },
+  complete: { background: "var(--rl-bg)", color: "var(--rl)", border: "1px solid var(--rl-bd)" },
+  error:    { background: "var(--rh-bg)", color: "var(--rh)", border: "1px solid var(--rh-bd)" },
 };
 
-function scoreBadgeColor(score: number) {
-  if (score <= 29) return "#34c759";
-  if (score <= 69) return "#ff9500";
-  return "#ff4d4d";
+function ShieldIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" width="16" height="16">
+      <path d="M10 2l-7 3v5c0 4.5 3 8.5 7 9.5 4-1 7-5 7-9.5V5l-7-3z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
+    </svg>
+  );
 }
 
 export default function ContractViewer({
@@ -63,6 +64,8 @@ export default function ContractViewer({
   const [pageTexts, setPageTexts] = useState<string[]>([]);
   const [isScanning, setIsScanning] = useState(!!initiallyScanning);
   const [isMobile, setIsMobile] = useState(false);
+  const [currentScan, setCurrentScan] = useState<ScanResult | null>(initialScan);
+  const [rescanFn, setRescanFn] = useState<(() => void) | null>(null);
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768);
@@ -71,66 +74,97 @@ export default function ContractViewer({
     return () => window.removeEventListener("resize", check);
   }, []);
 
-  const statusStyle = statusStyles[contractStatus] ?? statusStyles.pending;
+  const statusStyle = statusBadgeStyle[contractStatus] ?? statusBadgeStyle.pending;
+  const isComplete = currentScan !== null;
 
-  // ── Slim header (52px, shared across mobile and desktop) ──────────
-  const SlimHeader = (
-    <header
-      style={{
-        height: 52, flexShrink: 0,
-        background: "rgba(6,6,9,0.9)", backdropFilter: "blur(12px)",
-        borderBottom: "0.5px solid rgba(255,255,255,0.06)",
-        padding: "0 24px", position: "sticky", top: 0, zIndex: 50,
-        display: "flex", alignItems: "center", gap: 12,
-      }}
-    >
+  const TopBar = (
+    <header style={{
+      flexShrink: 0,
+      background: "var(--bg-sidebar)",
+      borderBottom: "1px solid var(--bd-subtle)",
+      padding: "0 24px",
+      height: 52,
+      display: "flex", alignItems: "center", gap: 12,
+      position: "sticky", top: 0, zIndex: 50,
+    }}>
       {/* Back */}
       <button
         onClick={() => router.push("/dashboard")}
-        style={{
-          display: "flex", alignItems: "center", gap: 6,
-          background: "none", border: "none", cursor: "pointer",
-          color: "rgba(255,255,255,0.4)", fontSize: 13, padding: 0,
-          flexShrink: 0, transition: "color 0.15s",
-          fontFamily: "inherit",
-        }}
-        onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "#fff"; }}
-        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.color = "rgba(255,255,255,0.4)"; }}
+        className="btn btn-ghost btn-sm"
+        style={{ gap: 6, flexShrink: 0 }}
       >
-        <ChevronLeft size={14} />
-        Contracts
+        <svg viewBox="0 0 16 16" fill="none" width="13" height="13">
+          <path d="M10 4L6 8l4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+        </svg>
+        Back
       </button>
+
+      {/* Divider */}
+      <div style={{ width: 1, height: 20, background: "var(--bd-subtle)", flexShrink: 0 }} />
 
       {/* Title */}
       <div style={{ flex: 1, minWidth: 0 }}>
-        <span
-          style={{
-            fontSize: 15, fontWeight: 500, color: "#fff",
-            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-            display: "block",
-          }}
-        >
+        <span style={{
+          fontSize: 15, fontWeight: 700, color: "var(--tx-primary)",
+          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+          display: "block",
+        }}>
           {contractTitle}
         </span>
       </div>
 
       {/* Status badge */}
-      <span
-        style={{
-          ...statusStyle,
-          fontSize: 11, fontWeight: 500, borderRadius: 6,
-          padding: "3px 9px", textTransform: "capitalize", flexShrink: 0,
-        }}
-      >
+      <span style={{
+        ...statusStyle,
+        fontSize: 11, fontWeight: 600, borderRadius: 99,
+        padding: "3px 10px", textTransform: "capitalize",
+        letterSpacing: "0.03em", flexShrink: 0,
+      }}>
         {contractStatus}
       </span>
+
+      {/* Action buttons (when scan complete) */}
+      {isComplete && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => currentScan && exportScanReport(currentScan, contractTitle)}
+            style={{ gap: 6 }}
+          >
+            <svg viewBox="0 0 16 16" fill="none" width="12" height="12">
+              <path d="M8 2v8M4 10l4 4 4-4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M2 14h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+            </svg>
+            PDF Report
+          </button>
+          <button
+            className="btn btn-ghost btn-sm"
+            disabled
+            title="Coming soon"
+            style={{ gap: 6, opacity: 0.4, cursor: "not-allowed" }}
+          >
+            Word Doc
+          </button>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => rescanFn?.()}
+            style={{ color: "var(--ac-lite)", borderColor: "rgba(255,149,0,0.25)", gap: 6 }}
+          >
+            <svg viewBox="0 0 16 16" fill="none" width="12" height="12">
+              <path d="M2 8a6 6 0 116 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+              <path d="M2 8V4M2 8H6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+            Re-analyse
+          </button>
+        </div>
+      )}
     </header>
   );
 
   if (isMobile) {
     return (
       <div style={{ position: "relative", height: "100vh", display: "flex", flexDirection: "column" }}>
-        {SlimHeader}
+        {TopBar}
         <div style={{ flex: 1, overflow: "hidden" }}>
           <PDFViewer
             fileUrl={pdfUrl}
@@ -145,35 +179,34 @@ export default function ContractViewer({
           <SheetTrigger
             style={{
               position: "fixed", bottom: 24, right: 24, zIndex: 50,
-              background: "#5b4fff", border: "none", borderRadius: "50%",
+              background: "var(--ac)", border: "none", borderRadius: "50%",
               width: 52, height: 52, display: "flex", alignItems: "center",
               justifyContent: "center",
-              boxShadow: "0 4px 20px rgba(91,79,255,0.5)", cursor: "pointer",
+              boxShadow: "0 4px 20px rgba(255,149,0,0.4)", cursor: "pointer",
+              color: "#000",
             }}
           >
-            <ShieldCheck size={22} color="white" />
-            {initialScan && (
-              <span
-                style={{
-                  position: "absolute", top: -4, right: -4,
-                  background: scoreBadgeColor(initialScan.risk_score),
-                  color: "#000", fontSize: 9, fontWeight: 700,
-                  borderRadius: 9999, padding: "2px 5px",
-                  minWidth: 18, textAlign: "center",
-                }}
-              >
-                {initialScan.risk_score}
+            <ShieldIcon />
+            {currentScan && (
+              <span style={{
+                position: "absolute", top: -4, right: -4,
+                background: currentScan.risk_score >= 70 ? "var(--rh)" : "var(--ac)",
+                color: "#000", fontSize: 9, fontWeight: 700,
+                borderRadius: 9999, padding: "2px 5px",
+                minWidth: 18, textAlign: "center",
+              }}>
+                {currentScan.risk_score}
               </span>
             )}
           </SheetTrigger>
           <SheetContent
             side="bottom"
             style={{
-              background: "#0a0a12", border: "0.5px solid rgba(255,255,255,0.08)",
+              background: "var(--bg-surface)", border: "1px solid var(--bd-subtle)",
               borderRadius: "20px 20px 0 0", maxHeight: "80vh", overflowY: "auto", padding: 0,
             }}
           >
-            <div style={{ padding: "1.5rem" }}>
+            <div style={{ padding: "18px 22px" }}>
               <RiskPanel
                 contractId={contractId}
                 contractTitle={contractTitle}
@@ -184,9 +217,11 @@ export default function ContractViewer({
                 onClauseClick={(page) => setCurrentPage(page)}
                 onScanStart={() => setIsScanning(true)}
                 onScanEnd={() => setIsScanning(false)}
+                onScanComplete={(scan) => setCurrentScan(scan)}
+                onRegisterRescan={(fn) => setRescanFn(() => fn)}
               />
-              <div style={{ background: "rgba(255,255,255,0.015)", border: "0.5px solid rgba(255,255,255,0.05)", borderRadius: 12, padding: "1rem", marginTop: 16 }}>
-                <p style={{ fontSize: 11.5, fontWeight: 500, color: "rgba(255,255,255,0.25)", marginBottom: 10, letterSpacing: "0.04em", textTransform: "uppercase" }}>
+              <div style={{ marginTop: 20, padding: "12px 0", borderTop: "1px solid var(--bd-subtle)" }}>
+                <p style={{ fontSize: 11, fontWeight: 600, color: "var(--tx-muted)", marginBottom: 10, letterSpacing: "0.06em", textTransform: "uppercase" }}>
                   Danger zone
                 </p>
                 <DeleteContractButton contractId={contractId} />
@@ -201,11 +236,15 @@ export default function ContractViewer({
   // Desktop
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100vh" }}>
-      {SlimHeader}
+      {TopBar}
 
-      <div style={{ display: "flex", flex: 1, overflow: "hidden", height: "calc(100vh - 52px)" }}>
-        {/* PDF panel — 60% */}
-        <div style={{ flex: "0 0 60%", overflow: "hidden", borderRight: "0.5px solid rgba(255,255,255,0.06)" }}>
+      <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
+        {/* PDF panel — 42% */}
+        <div style={{
+          flex: "0 0 42%", overflow: "hidden", position: "relative",
+          borderRight: "1px solid var(--bd-subtle)",
+          background: "#080A14",
+        }}>
           <PDFViewer
             fileUrl={pdfUrl}
             currentPage={currentPage}
@@ -215,21 +254,28 @@ export default function ContractViewer({
           />
         </div>
 
-        {/* Risk panel — 40% */}
-        <div style={{ flex: "0 0 40%", overflowY: "auto", padding: "24px", background: "#060609", display: "flex", flexDirection: "column", gap: 12 }}>
-          <RiskPanel
-            contractId={contractId}
-            contractTitle={contractTitle}
-            userEmail={userEmail}
-            initialScan={initialScan}
-            initiallyScanning={initiallyScanning}
-            pageTexts={pageTexts}
-            onClauseClick={setCurrentPage}
-            onScanStart={() => setIsScanning(true)}
-            onScanEnd={() => setIsScanning(false)}
-          />
-          <div style={{ background: "rgba(255,255,255,0.015)", border: "0.5px solid rgba(255,255,255,0.05)", borderRadius: 12, padding: "1rem", marginTop: 4 }}>
-            <p style={{ fontSize: 11.5, fontWeight: 500, color: "rgba(255,255,255,0.25)", marginBottom: 10, letterSpacing: "0.04em", textTransform: "uppercase" }}>
+        {/* Right panel — 58% */}
+        <div style={{
+          flex: 1, overflowY: "auto", background: "var(--bg-surface)",
+          display: "flex", flexDirection: "column",
+        }}>
+          <div style={{ flex: 1, padding: "18px 22px", minHeight: 0 }}>
+            <RiskPanel
+              contractId={contractId}
+              contractTitle={contractTitle}
+              userEmail={userEmail}
+              initialScan={initialScan}
+              initiallyScanning={initiallyScanning}
+              pageTexts={pageTexts}
+              onClauseClick={setCurrentPage}
+              onScanStart={() => setIsScanning(true)}
+              onScanEnd={() => setIsScanning(false)}
+              onScanComplete={(scan) => setCurrentScan(scan)}
+              onRegisterRescan={(fn) => setRescanFn(() => fn)}
+            />
+          </div>
+          <div style={{ padding: "14px 22px 18px", borderTop: "1px solid var(--bd-subtle)" }}>
+            <p style={{ fontSize: 11, fontWeight: 600, color: "var(--tx-muted)", marginBottom: 10, letterSpacing: "0.06em", textTransform: "uppercase" }}>
               Danger zone
             </p>
             <DeleteContractButton contractId={contractId} />

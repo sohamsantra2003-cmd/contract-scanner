@@ -82,18 +82,17 @@ export function PDFViewer({
   }
 
   return (
-    <div style={{ height: "100%", background: "#0a0a12", position: "relative", display: "flex", flexDirection: "column" }}>
-      {/* MRI scan overlay — visible during scanning */}
+    <div style={{ height: "100%", background: "#080A14", position: "relative", display: "flex", flexDirection: "column" }}>
+      {/* Amber scan bar — visible during scanning */}
       {isScanning && (
         <div style={{ position: "absolute", inset: 0, overflow: "hidden", pointerEvents: "none", zIndex: 5 }}>
-          <div className="mri-line" />
-          <div className="mri-glow" />
-          <div style={{ position: "absolute", inset: 0, background: "rgba(6,6,9,0.4)" }} />
+          <div className="scan-bar" />
+          <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.3)" }} />
           <span
             style={{
               position: "absolute", bottom: 60, right: 16,
               fontSize: 11, color: "rgba(255,255,255,0.4)",
-              fontFamily: "SF Mono, ui-monospace, monospace",
+              fontFamily: "var(--ff-mono)",
               letterSpacing: "0.04em",
             }}
           >
@@ -105,7 +104,7 @@ export function PDFViewer({
       {/* Scrollable PDF area */}
       <div
         className="flex-1"
-        style={{ overflowY: "auto", display: "flex", justifyContent: "center", padding: "20px 16px 80px", background: "#0d0d14", flex: 1 }}
+        style={{ overflowY: "auto", display: "flex", justifyContent: "center", padding: "20px 16px 80px", background: "#080A14", flex: 1 }}
       >
         <Document
           file={fileUrl}
