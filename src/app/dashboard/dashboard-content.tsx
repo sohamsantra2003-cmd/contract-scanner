@@ -1,10 +1,9 @@
 "use client";
 
-import { useRef } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Search, MessageSquare, PenLine, Upload, Shield } from "lucide-react";
-import { UploadZone } from "@/components/UploadZone";
 import { ContractRow } from "@/components/ContractRow";
+import { UploadZone } from "@/components/UploadZone";
 
 interface Contract {
   id: string;
@@ -15,75 +14,83 @@ interface Contract {
   scans?: { risk_score: number; scanned_at: string }[];
 }
 
-const featureCards = [
-  { Icon: Search, label: "Risk detection" },
-  { Icon: MessageSquare, label: "Plain English" },
-  { Icon: PenLine, label: "Safer rewrites" },
-];
-
-function scoreColor(score: number) {
-  if (score <= 29) return "#34c759";
-  if (score <= 69) return "#ff9500";
-  return "#ff4d4d";
-}
-
-function PillUploadButton({ onClick }: { onClick: () => void }) {
+function ShieldLogo({ size = 28 }: { size?: number }) {
+  const id = "sl-dash-" + size;
   return (
-    <button
-      onClick={onClick}
-      style={{
-        display: "inline-flex", alignItems: "center", gap: 8,
-        background: "linear-gradient(135deg, #5b4fff, #7c3aed)",
-        border: "none", borderRadius: 980,
-        padding: "10px 20px", fontSize: 14, fontWeight: 600,
-        color: "white", cursor: "pointer",
-        boxShadow: "0 4px 20px rgba(91,79,255,0.4), inset 0 1px 0 rgba(255,255,255,0.1)",
-        transition: "opacity 0.15s",
-      }}
-      onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = "0.85"; }}
-      onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = "1"; }}
-    >
-      <Upload size={15} />
-      Upload contract
-    </button>
+    <svg width={size} height={Math.round(size * 1.17)} viewBox="0 0 24 28" fill="none">
+      <defs>
+        <linearGradient id={id} x1="2" y1="1" x2="22" y2="27" gradientUnits="userSpaceOnUse">
+          <stop offset="0%" stopColor="#FFD080" />
+          <stop offset="100%" stopColor="#FF9500" />
+        </linearGradient>
+      </defs>
+      <path d="M12 1L2 5.5V13c0 6.35 4.5 12.28 10 13.88C17.5 25.28 22 19.35 22 13V5.5L12 1z"
+        fill={"url(#" + id + ")"} fillOpacity=".18" stroke={"url(#" + id + ")"} strokeWidth="1.4" strokeLinejoin="round" />
+      <line x1="7.5" y1="12" x2="16.5" y2="12" stroke={"url(#" + id + ")"} strokeWidth="1.5" strokeLinecap="round" opacity=".95" />
+      <line x1="7.5" y1="15.8" x2="14.2" y2="15.8" stroke={"url(#" + id + ")"} strokeWidth="1.5" strokeLinecap="round" opacity=".7" />
+      <line x1="7.5" y1="19.5" x2="11.5" y2="19.5" stroke={"url(#" + id + ")"} strokeWidth="1.5" strokeLinecap="round" opacity=".45" />
+    </svg>
   );
 }
 
-function UploadTrigger({ label, style }: { label: string; style?: React.CSSProperties }) {
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const router = useRouter();
+function scoreColor(score: number): string {
+  if (score >= 70) return "#FF3B30";
+  if (score >= 40) return "#FF9500";
+  return "#30D158";
+}
 
-  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (file.type !== "application/pdf") return;
-    if (file.size > 10 * 1024 * 1024) return;
-    const { uploadContract } = await import("@/app/actions/contracts");
-    const formData = new FormData();
-    formData.append("file", file);
-    const result = await uploadContract(formData);
-    if (result.data) router.push(`/dashboard/contracts/${result.data.id}`);
-  }
-
+function StatCard({
+  label, sub, value, color, hex, delay,
+  icon,
+}: {
+  label: string;
+  sub: string;
+  value: string | number;
+  color: string;
+  hex: string;
+  delay: number;
+  icon: React.ReactNode;
+}) {
   return (
-    <>
-      <button
-        onClick={() => fileInputRef.current?.click()}
-        style={style}
-        onMouseEnter={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = "0.85"; }}
-        onMouseLeave={(e) => { (e.currentTarget as HTMLButtonElement).style.opacity = "1"; }}
-      >
-        <Upload size={15} />
-        {label}
-      </button>
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".pdf,application/pdf"
-        style={{ display: "none" }}
-        onChange={handleFileChange}
-      />
-    </>
+    <div
+      className="card"
+      style={{
+        padding: "28px 28px 24px", overflow: "hidden", position: "relative",
+        borderTop: `1px solid ${hex}22`,
+        animation: `countUp .42s ease ${delay}s both`,
+      }}
+    >
+      {/* Background glow */}
+      <div style={{
+        position: "absolute", top: -40, right: -40,
+        width: 130, height: 130, borderRadius: "50%",
+        background: `radial-gradient(circle, ${hex}1A 0%, transparent 70%)`,
+        pointerEvents: "none",
+      }} />
+
+      {/* Icon */}
+      <div style={{
+        width: 40, height: 40, borderRadius: 12, marginBottom: 20,
+        background: `${hex}18`, border: `1px solid ${hex}28`,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        color,
+      }}>
+        {icon}
+      </div>
+
+      {/* Big number */}
+      <div style={{
+        fontFamily: "var(--ff-mono)", fontSize: 64, fontWeight: 500,
+        lineHeight: 0.95, letterSpacing: "-3px",
+        color, textShadow: `0 0 30px ${hex}30`,
+        marginBottom: 14,
+      }}>
+        {value}
+      </div>
+
+      <div style={{ fontWeight: 600, fontSize: 15, color: "var(--tx-primary)", marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 12.5, color: "var(--tx-muted)" }}>{sub}</div>
+    </div>
   );
 }
 
@@ -95,180 +102,193 @@ export function DashboardContent({
   initials: string;
   contracts: Contract[];
 }) {
-  const hasContracts = contracts.length > 0;
+  const [showUpload, setShowUpload] = useState(false);
 
-  // Stat computations
-  const scoresAll = contracts.flatMap((c) => c.scans?.map((s) => s.risk_score) ?? []);
+  const completeContracts = contracts.filter((c) => c.status === "complete");
+  const pendingContracts = contracts.filter((c) => c.status === "pending");
+  const scoresAll = completeContracts.flatMap((c) => c.scans?.map((s) => s.risk_score) ?? []);
   const avgScore = scoresAll.length > 0
     ? Math.round(scoresAll.reduce((a, b) => a + b, 0) / scoresAll.length)
     : null;
 
-  return (
-    <div style={{ minHeight: "100vh", background: "#060609" }}>
+  const totalHighClauses = 0;
 
-      {hasContracts ? (
-        <div style={{ padding: "40px 40px 40px 40px" }}>
-          {/* Page header */}
-          <div style={{ marginBottom: 32 }}>
-            <h1 style={{ fontSize: 32, fontWeight: 600, color: "#fff", letterSpacing: "-0.03em", marginBottom: 6 }}>
-              Dashboard
-            </h1>
-            <p style={{ fontSize: 14, color: "rgba(255,255,255,0.4)" }}>
-              Your contract risk overview
-            </p>
+  const today = new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
+
+  if (contracts.length === 0 && !showUpload) {
+    return (
+      <div style={{ padding: "48px 40px" }}>
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 40 }}>
+          <div>
+            <h1 style={{ fontFamily: "var(--ff-display)", fontWeight: 800, fontSize: 32, letterSpacing: "-0.03em", color: "var(--tx-primary)", marginBottom: 5 }}>Dashboard</h1>
+            <p style={{ fontSize: 13.5, color: "var(--tx-secondary)" }}>{today}</p>
           </div>
-
-          {/* Stat cards */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 32 }}>
-            {/* Total contracts */}
-            <div
-              className="glass-card"
-              style={{ height: 120, padding: 24, display: "flex", flexDirection: "column", justifyContent: "space-between" }}
-            >
-              <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(91,79,255,0.9)" }}>
-                Total Contracts
-              </span>
-              <span style={{ fontSize: 48, fontWeight: 700, letterSpacing: "-0.04em", color: "#fff", lineHeight: 1 }}>
-                {contracts.length}
-              </span>
-            </div>
-
-            {/* Average risk score */}
-            <div
-              className="glass-card"
-              style={{ height: 120, padding: 24, display: "flex", flexDirection: "column", justifyContent: "space-between" }}
-            >
-              <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(91,79,255,0.9)" }}>
-                Average Risk Score
-              </span>
-              <span
-                style={{
-                  fontSize: 48, fontWeight: 700, letterSpacing: "-0.04em", lineHeight: 1,
-                  color: avgScore !== null ? scoreColor(avgScore) : "rgba(255,255,255,0.3)",
-                }}
-              >
-                {avgScore !== null ? avgScore : "—"}
-              </span>
-            </div>
-
-            {/* High risk clauses */}
-            <div
-              className="glass-card"
-              style={{ height: 120, padding: 24, display: "flex", flexDirection: "column", justifyContent: "space-between" }}
-            >
-              <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: "0.1em", textTransform: "uppercase", color: "rgba(91,79,255,0.9)" }}>
-                High Risk Clauses
-              </span>
-              <span style={{ fontSize: 48, fontWeight: 700, letterSpacing: "-0.04em", color: "#ff4d4d", lineHeight: 1 }}>
-                —
-              </span>
-            </div>
-          </div>
-
-          {/* Section header */}
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-            <h2 style={{ fontSize: 28, fontWeight: 600, color: "#fff", letterSpacing: "-0.03em" }}>
-              Your contracts
-            </h2>
-            <UploadTrigger
-              label="Upload contract"
-              style={{
-                display: "inline-flex", alignItems: "center", gap: 8,
-                background: "linear-gradient(135deg, #5b4fff, #7c3aed)",
-                border: "none", borderRadius: 980,
-                padding: "10px 20px", fontSize: 14, fontWeight: 600,
-                color: "white", cursor: "pointer",
-                boxShadow: "0 4px 20px rgba(91,79,255,0.4), inset 0 1px 0 rgba(255,255,255,0.1)",
-                transition: "opacity 0.15s",
-              }}
-            />
-          </div>
-
-          {/* Contract rows */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {contracts.map((contract) => (
-              <ContractRow key={contract.id} contract={contract} />
-            ))}
-          </div>
-        </div>
-      ) : (
-        /* Empty state */
-        <div
-          style={{
-            minHeight: "calc(100vh - 0px)",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: "40px",
-            gap: 0,
-          }}
-        >
-          {/* Glow icon */}
-          <div
-            className="glow-pulse"
-            style={{
-              width: 80, height: 80, borderRadius: 20,
-              background: "rgba(91,79,255,0.1)",
-              border: "0.5px solid rgba(91,79,255,0.2)",
-              display: "flex", alignItems: "center", justifyContent: "center",
-              marginBottom: 24,
-            }}
+          <button
+            className="btn btn-primary"
+            onClick={() => setShowUpload(true)}
+            style={{ gap: 8 }}
           >
-            <Shield size={32} color="#5b4fff" strokeWidth={1.5} />
-          </div>
+            <svg viewBox="0 0 16 16" fill="none" width="14" height="14">
+              <path d="M8 2v8M4 6l4-4 4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              <path d="M2 12h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+            </svg>
+            Upload Contract
+          </button>
+        </div>
 
-          <h1 style={{ fontSize: 32, fontWeight: 600, letterSpacing: "-0.03em", textAlign: "center", marginBottom: 12, color: "#fff" }}>
-            Upload your first contract
-          </h1>
-          <p style={{ fontSize: 15, color: "rgba(255,255,255,0.4)", textAlign: "center", maxWidth: 420, margin: "0 auto 32px" }}>
-            Drop any PDF contract and get an instant AI risk report in plain English.
+        {showUpload && (
+          <div style={{ marginBottom: 32, animation: "fadeUp .2s ease both" }}>
+            <UploadZone />
+            <button
+              className="btn btn-ghost btn-sm"
+              style={{ marginTop: 10 }}
+              onClick={() => setShowUpload(false)}
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+
+        {/* Empty state */}
+        <div className="card" style={{ padding: "60px 40px", textAlign: "center" }}>
+          <div style={{ display: "flex", justifyContent: "center", marginBottom: 20, opacity: 0.4 }}>
+            <ShieldLogo size={64} />
+          </div>
+          <h2 style={{ fontFamily: "var(--ff-display)", fontWeight: 700, fontSize: 20, color: "var(--tx-primary)", marginBottom: 8 }}>
+            No contracts yet
+          </h2>
+          <p style={{ fontSize: 14, color: "var(--tx-secondary)", marginBottom: 24 }}>
+            Upload your first contract to get started.
           </p>
+          <button className="btn btn-primary" onClick={() => setShowUpload(true)}>
+            Upload Contract
+          </button>
+        </div>
+      </div>
+    );
+  }
 
-          <UploadTrigger
-            label="Upload contract"
-            style={{
-              display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-              background: "linear-gradient(135deg, #5b4fff, #7c3aed)",
-              border: "none", borderRadius: 980,
-              padding: "14px 32px", fontSize: 15, fontWeight: 600,
-              color: "white", cursor: "pointer", maxWidth: 280, width: "100%",
-              boxShadow: "0 4px 20px rgba(91,79,255,0.4), inset 0 1px 0 rgba(255,255,255,0.1)",
-              marginBottom: 40, transition: "opacity 0.15s",
-            }}
-          />
+  return (
+    <div style={{ padding: "48px 40px" }}>
+      {/* Page header */}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 32 }}>
+        <div>
+          <h1 style={{ fontFamily: "var(--ff-display)", fontWeight: 800, fontSize: 32, letterSpacing: "-0.03em", color: "var(--tx-primary)", marginBottom: 5 }}>
+            Dashboard
+          </h1>
+          <p style={{ fontSize: 13.5, color: "var(--tx-secondary)" }}>{today}</p>
+        </div>
+        <button
+          className="btn btn-primary"
+          onClick={() => setShowUpload((v) => !v)}
+          style={{ gap: 8 }}
+        >
+          <svg viewBox="0 0 16 16" fill="none" width="14" height="14">
+            <path d="M8 2v8M4 6l4-4 4 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+            <path d="M2 12h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+          </svg>
+          Upload Contract
+        </button>
+      </div>
 
-          {/* Feature cards */}
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "center" }}>
-            {featureCards.map(({ Icon, label }) => (
-              <div
-                key={label}
-                style={{
-                  width: 130, padding: 14,
-                  background: "rgba(255,255,255,0.025)",
-                  border: "0.5px solid rgba(255,255,255,0.06)",
-                  borderRadius: 14,
-                }}
-              >
-                <div
-                  style={{
-                    width: 28, height: 28, borderRadius: 7,
-                    background: "rgba(91,79,255,0.1)",
-                    border: "0.5px solid rgba(91,79,255,0.15)",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    marginBottom: 10,
-                  }}
-                >
-                  <Icon size={14} color="#818cf8" />
-                </div>
-                <p style={{ fontSize: 13, fontWeight: 500, color: "rgba(255,255,255,0.5)", lineHeight: 1.4 }}>
-                  {label}
-                </p>
-              </div>
-            ))}
-          </div>
+      {/* Upload zone */}
+      {showUpload && (
+        <div style={{ marginBottom: 24, animation: "fadeUp .2s ease both" }}>
+          <UploadZone />
+          <button
+            className="btn btn-ghost btn-sm"
+            style={{ marginTop: 10 }}
+            onClick={() => setShowUpload(false)}
+          >
+            Cancel
+          </button>
         </div>
       )}
+
+      {/* Stat cards */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 28 }}>
+        <StatCard
+          label="Contracts Scanned"
+          sub={`${contracts.length} total · ${pendingContracts.length} pending`}
+          value={completeContracts.length}
+          color="#FF9500"
+          hex="#FF9500"
+          delay={0}
+          icon={
+            <svg viewBox="0 0 16 16" fill="none" width="18" height="18">
+              <path d="M3 2h7l3 3v9a1 1 0 01-1 1H3a1 1 0 01-1-1V3a1 1 0 011-1z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
+              <path d="M10 2v3h3" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+              <line x1="5" y1="9" x2="11" y2="9" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+              <line x1="5" y1="12" x2="9" y2="12" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+            </svg>
+          }
+        />
+        <StatCard
+          label="Average Risk Score"
+          sub="Across all analysed contracts"
+          value={avgScore !== null ? avgScore : "—"}
+          color={avgScore !== null ? scoreColor(avgScore) : "#FF9500"}
+          hex={avgScore !== null ? (avgScore >= 70 ? "#FF3B30" : "#FF9500") : "#FF9500"}
+          delay={0.1}
+          icon={
+            <svg viewBox="0 0 16 16" fill="none" width="18" height="18">
+              <path d="M8 2v4M8 10v4M2 8h4M10 8h4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+              <circle cx="8" cy="8" r="2" stroke="currentColor" strokeWidth="1.4"/>
+            </svg>
+          }
+        />
+        <StatCard
+          label="High-Risk Clauses"
+          sub={`${totalHighClauses} total clauses identified`}
+          value={totalHighClauses}
+          color="#FF3B30"
+          hex="#FF3B30"
+          delay={0.2}
+          icon={
+            <svg viewBox="0 0 16 16" fill="none" width="18" height="18">
+              <path d="M8 2L1 14h14L8 2z" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/>
+              <line x1="8" y1="7" x2="8" y2="10" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round"/>
+              <circle cx="8" cy="12" r=".75" fill="currentColor"/>
+            </svg>
+          }
+        />
+      </div>
+
+      {/* Contracts table */}
+      <div className="card" style={{ overflow: "hidden" }}>
+        {/* Table header */}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "20px 24px 0" }}>
+          <h2 style={{ fontFamily: "var(--ff-display)", fontWeight: 700, fontSize: 17, color: "var(--tx-primary)" }}>
+            Recent Contracts
+          </h2>
+        </div>
+
+        {/* Column headers */}
+        <div style={{
+          display: "grid",
+          gridTemplateColumns: "1fr 150px 185px 120px 40px",
+          gap: 16, padding: "14px 24px 10px",
+          borderBottom: "1px solid var(--bd-subtle)",
+        }}>
+          {["CONTRACT", "CLIENT", "RISK SCORE", "STATUS", ""].map((col) => (
+            <div key={col} style={{ fontSize: 10.5, fontWeight: 700, color: "var(--tx-muted)", textTransform: "uppercase", letterSpacing: "0.08em" }}>
+              {col}
+            </div>
+          ))}
+        </div>
+
+        {/* Rows */}
+        {contracts.map((contract) => (
+          <ContractRow key={contract.id} contract={contract} />
+        ))}
+
+        {contracts.length === 0 && (
+          <div style={{ padding: "60px 40px", textAlign: "center" }}>
+            <p style={{ fontSize: 14, color: "var(--tx-secondary)" }}>No contracts yet.</p>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
