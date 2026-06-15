@@ -7,17 +7,34 @@ export default async function CalendarPage() {
   if (!user) redirect("/login");
 
   return (
-    <div style={{ padding: "48px 40px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "calc(100vh - 52px)", gap: 16, textAlign: "center" }}>
-      <div style={{ fontSize: 56, lineHeight: 1 }}>📅</div>
-      <h1 style={{ fontSize: 28, fontWeight: 600, color: "#fff", letterSpacing: "-0.03em", margin: 0 }}>
-        Contract Calendar
-      </h1>
-      <p style={{ fontSize: 14, color: "rgba(255,255,255,0.35)", lineHeight: 1.6, maxWidth: 360, margin: 0 }}>
-        Track renewal dates, notice periods, and key contract milestones in one timeline view.
-      </p>
-      <span style={{ marginTop: 8, fontSize: 11, fontWeight: 500, letterSpacing: "0.08em", textTransform: "uppercase", color: "#5b4fff", background: "rgba(91,79,255,0.12)", border: "0.5px solid rgba(91,79,255,0.25)", borderRadius: 9999, padding: "4px 12px" }}>
-        Coming soon
-      </span>
+    <div style={{ padding: "48px 40px" }}>
+      <div style={{ marginBottom: 32 }}>
+        <h1 style={{ fontFamily: "var(--ff-display)", fontSize: 26, fontWeight: 800, letterSpacing: "-.02em", color: "var(--tx-primary)", marginBottom: 6 }}>
+          Contract Calendar
+        </h1>
+        <p style={{ fontSize: 13.5, color: "var(--tx-secondary)" }}>
+          Track renewal dates, notice periods, and key contract milestones.
+        </p>
+      </div>
+
+      <div className="card" style={{ padding: "60px 40px", textAlign: "center" }}>
+        <div style={{ fontSize: 48, lineHeight: 1, marginBottom: 20, opacity: 0.5 }}>📅</div>
+        <h2 style={{ fontFamily: "var(--ff-display)", fontWeight: 700, fontSize: 20, color: "var(--tx-primary)", marginBottom: 8, letterSpacing: "-0.02em" }}>
+          Calendar View
+        </h2>
+        <p style={{ fontSize: 13.5, color: "var(--tx-secondary)", lineHeight: 1.6, maxWidth: 360, margin: "0 auto 20px" }}>
+          Track renewal dates, notice periods, and key contract milestones in one timeline view.
+        </p>
+        <span style={{
+          display: "inline-block", fontSize: 11, fontWeight: 600,
+          letterSpacing: "0.08em", textTransform: "uppercase",
+          color: "var(--ac)", background: "var(--ac-bg)",
+          border: "1px solid rgba(255,149,0,0.2)",
+          borderRadius: 9999, padding: "4px 14px",
+        }}>
+          Coming soon
+        </span>
+      </div>
     </div>
   );
 }
