@@ -1,12 +1,28 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Syne, Plus_Jakarta_Sans, DM_Mono } from "next/font/google";
 import "./globals.css";
 import { Toaster } from "sonner";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { SideNav } from "@/components/SideNav";
 import { createClient } from "@/lib/supabase/server";
 
-const inter = Inter({ subsets: ["latin"] });
+const syne = Syne({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700", "800"],
+  variable: "--font-syne",
+});
+
+const jakarta = Plus_Jakarta_Sans({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-jakarta",
+});
+
+const dmMono = DM_Mono({
+  subsets: ["latin"],
+  weight: ["400", "500"],
+  variable: "--font-mono",
+});
 
 export const metadata: Metadata = {
   title: "Contract Scanner — AI Contract Risk Analysis",
@@ -32,15 +48,15 @@ export default async function RootLayout({
   const showNav = !!userEmail;
 
   return (
-    <html lang="en">
-      <body className={inter.className} style={{ overflow: "hidden" }}>
+    <html lang="en" className={`${syne.variable} ${jakarta.variable} ${dmMono.variable}`}>
+      <body style={{ overflow: "hidden" }}>
         <ErrorBoundary>
           <div
             style={{
               display: "flex",
               height: "100vh",
               overflow: "hidden",
-              background: "#060609",
+              background: "var(--bg-base)",
             }}
           >
             {showNav && <SideNav userEmail={userEmail} />}
@@ -50,11 +66,11 @@ export default async function RootLayout({
                 overflowY: "auto",
                 overflowX: "hidden",
                 height: "100vh",
-                background: "#060609",
-                width: showNav ? "calc(100vw - 240px)" : "100vw",
+                background: "transparent",
+                width: showNav ? "calc(100vw - 228px)" : "100vw",
               }}
             >
-              <div className="screen-enter" style={{ minHeight: "100%" }}>
+              <div className="page-anim" style={{ minHeight: "100%" }}>
                 {children}
               </div>
             </main>
