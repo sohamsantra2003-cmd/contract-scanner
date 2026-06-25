@@ -29,6 +29,7 @@ type ScanResult = {
   clauses: Clause[];
   tokens_used: number;
   scanned_at: string;
+  coverage?: { chunksTotal: number; chunksProcessed: number; complete: boolean };
 };
 
 interface ContractViewerProps {

@@ -64,6 +64,11 @@ export default async function ContractPage({ params }: PageProps) {
         }[],
         tokens_used: existingScan.tokens_used as number,
         scanned_at: existingScan.scanned_at as string,
+        coverage: {
+          chunksTotal: (existingScan.chunks_total as number | null) ?? 1,
+          chunksProcessed: (existingScan.chunks_processed as number | null) ?? 1,
+          complete: (existingScan.coverage_complete as boolean | null) ?? true,
+        },
       }
     : null;
 

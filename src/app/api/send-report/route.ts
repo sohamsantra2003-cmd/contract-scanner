@@ -65,6 +65,14 @@ export async function POST(req: NextRequest) {
         <p style="font-size:13px;color:#6b7280;margin:4px 0 0;">Risk Score / 100 · Grade ${grade}</p>
       </div>
 
+      ${scan.coverage && !scan.coverage.complete ? `
+        <div style="background:#fffbeb;border:1px solid #f59e0b;border-radius:6px;padding:10px 14px;margin-bottom:16px;">
+          <p style="font-size:12px;color:#d97706;margin:0;">
+            <strong>Partial analysis:</strong> ${scan.coverage.chunksProcessed} of ${scan.coverage.chunksTotal} sections were analysed before the time limit. Some clauses may not appear in this report.
+          </p>
+        </div>
+      ` : ""}
+
       <p style="font-size:11px;font-weight:600;color:#4f46e5;text-transform:uppercase;letter-spacing:0.06em;margin:0 0 8px;">Executive Summary</p>
       <p style="font-size:13px;color:#374151;line-height:1.6;margin:0 0 24px;">${scan.summary}</p>
 

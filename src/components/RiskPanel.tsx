@@ -23,6 +23,7 @@ type ScanResult = {
   clauses: Clause[];
   tokens_used: number;
   scanned_at: string;
+  coverage?: { chunksTotal: number; chunksProcessed: number; complete: boolean };
 };
 
 type ScanState =
@@ -852,6 +853,20 @@ export function RiskPanel({
           </div>
         </div>
       </div>
+
+      {/* Partial-coverage banner */}
+      {scan.coverage && !scan.coverage.complete && (
+        <div style={{
+          background: "rgba(246,166,9,0.08)", border: "1px solid rgba(246,166,9,0.28)",
+          borderRadius: "var(--r-md)", padding: "10px 14px",
+          display: "flex", alignItems: "flex-start", gap: 8,
+        }}>
+          <span style={{ fontSize: 15, lineHeight: 1, flexShrink: 0, marginTop: 1 }}>⚠</span>
+          <p style={{ fontSize: 12, color: "#F6A609", margin: 0, lineHeight: 1.55 }}>
+            <strong>Partial analysis</strong> — {scan.coverage.chunksProcessed} of {scan.coverage.chunksTotal} sections were analysed before the time limit. Some clauses may not be shown.
+          </p>
+        </div>
+      )}
 
       {/* Filter tabs — categories */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>

@@ -90,6 +90,19 @@ export function exportScanReport(scan: ScanResult, contractTitle: string): void 
   doc.line(MARGIN, y, PAGE_W - MARGIN, y);
   y += 8;
 
+  // ── PARTIAL COVERAGE NOTE ─────────────────────────────────────────────────
+  if (scan.coverage && !scan.coverage.complete) {
+    checkPageBreak(10);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.setTextColor(AMBER[0], AMBER[1], AMBER[2]);
+    doc.text(
+      `⚠  Partial analysis: ${scan.coverage.chunksProcessed} of ${scan.coverage.chunksTotal} sections analysed — some clauses may not be shown.`,
+      MARGIN, y
+    );
+    y += 8;
+  }
+
   // ── RISK SCORE BLOCK ──────────────────────────────────────────────────────
   const grade = scoreGrade(scan.risk_score);
   const scoreCol: RGB =
