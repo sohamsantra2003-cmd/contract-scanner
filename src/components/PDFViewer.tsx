@@ -4,6 +4,8 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { Document, Page, pdfjs } from "react-pdf";
 import { ChevronLeft, ChevronRight, ZoomIn, ZoomOut } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
+import { PDFHighlightOverlay } from "@/components/PDFHighlightOverlay";
+import { extractPositionedItems, type PositionedTextItem, type HighlightRect } from "@/lib/pdf-positions";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
 
@@ -14,7 +16,14 @@ interface PDFViewerProps {
   currentPage?: number;
   onPageChange?: (page: number) => void;
   onTextExtracted?: (texts: string[]) => void;
+  onPositionedTextExtracted?: (pages: PositionedTextItem[][]) => void;
   isScanning?: boolean;
+  // Highlight overlay props — all optional; no overlay rendered if rects is empty
+  highlightRects?: HighlightRect[];
+  highlightClauseIds?: string[];
+  highlightSeverities?: string[];
+  activeClauseId?: string | null;
+  onHighlightClick?: (clauseId: string) => void;
 }
 
 async function extractPageTexts(
@@ -39,12 +48,41 @@ async function extractPageTexts(
   }
 }
 
+async function extractAllPositionedItems(
+  pdf: { numPages: number; getPage: (n: number) => Promise<any> },
+  onExtracted: (pages: PositionedTextItem[][]) => void
+) {
+  try {
+    const allPages: PositionedTextItem[][] = [];
+    for (let i = 1; i <= pdf.numPages; i++) {
+      try {
+        const page = await pdf.getPage(i);
+        const items = await extractPositionedItems(page);
+        allPages.push(items);
+      } catch {
+        allPages.push([]);
+      }
+    }
+    // TODO: remove this log once highlighting is confirmed working
+    console.log("[PDFHighlight] Page 1 item count:", allPages[0]?.length ?? 0, "sample:", allPages[0]?.[0]);
+    onExtracted(allPages);
+  } catch {
+    // non-critical
+  }
+}
+
 export function PDFViewer({
   fileUrl,
   currentPage,
   onPageChange,
   onTextExtracted,
+  onPositionedTextExtracted,
   isScanning = false,
+  highlightRects = [],
+  highlightClauseIds = [],
+  highlightSeverities = [],
+  activeClauseId = null,
+  onHighlightClick,
 }: PDFViewerProps) {
   const [numPages, setNumPages] = useState<number>(0);
   const [internalPage, setInternalPage] = useState<number>(1);
@@ -53,6 +91,9 @@ export function PDFViewer({
 
   const onTextExtractedRef = useRef(onTextExtracted);
   useEffect(() => { onTextExtractedRef.current = onTextExtracted; }, [onTextExtracted]);
+
+  const onPositionedTextExtractedRef = useRef(onPositionedTextExtracted);
+  useEffect(() => { onPositionedTextExtractedRef.current = onPositionedTextExtracted; }, [onPositionedTextExtracted]);
 
   useEffect(() => {
     if (currentPage !== undefined && currentPage !== internalPage) {
@@ -71,6 +112,7 @@ export function PDFViewer({
     setNumPages(pdf.numPages);
     setInternalPage(1);
     if (onTextExtractedRef.current) extractPageTexts(pdf, onTextExtractedRef.current);
+    if (onPositionedTextExtractedRef.current) extractAllPositionedItems(pdf, onPositionedTextExtractedRef.current);
   }, []);
 
   if (loadError) {
@@ -114,15 +156,25 @@ export function PDFViewer({
             <Skeleton style={{ width: 595, height: 600, borderRadius: 6, background: "rgba(255,255,255,0.04)" }} />
           }
         >
-          <Page
-            pageNumber={internalPage}
-            scale={scale}
-            renderTextLayer
-            renderAnnotationLayer
-            loading={
-              <Skeleton style={{ width: 595 * scale, height: 842 * scale, borderRadius: 6, background: "rgba(255,255,255,0.04)" }} />
-            }
-          />
+          <div style={{ position: "relative", display: "inline-block" }}>
+            <Page
+              pageNumber={internalPage}
+              scale={scale}
+              renderTextLayer
+              renderAnnotationLayer
+              loading={
+                <Skeleton style={{ width: 595 * scale, height: 842 * scale, borderRadius: 6, background: "rgba(255,255,255,0.04)" }} />
+              }
+            />
+            <PDFHighlightOverlay
+              rects={highlightRects}
+              scale={scale}
+              activeClauseId={activeClauseId}
+              rectClauseIds={highlightClauseIds}
+              rectSeverities={highlightSeverities}
+              onRectClick={onHighlightClick}
+            />
+          </div>
         </Document>
       </div>
 
