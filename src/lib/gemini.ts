@@ -25,33 +25,47 @@ function generationConfig(outputTokens: number) {
 export async function callGemini(
   prompt: string,
   prefetchedToken?: string,
-  outputTokens: number = 4096
+  outputTokens: number = 4096,
+  timeoutMs: number = 30000
 ): Promise<{ text: string; tokensUsed: number }> {
   const token = await getToken(prefetchedToken);
 
-  const response = await fetch(GEMINI_ENDPOINT, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify({
-      contents: [{ role: "user", parts: [{ text: prompt }] }],
-      generationConfig: generationConfig(outputTokens),
-    }),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Gemini API error ${response.status}: ${errorText}`);
+  try {
+    const response = await fetch(GEMINI_ENDPOINT, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: generationConfig(outputTokens),
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`Gemini API error ${response.status}: ${errorText}`);
+    }
+
+    const data = await response.json();
+    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!text) throw new Error("Gemini returned empty response");
+
+    const tokensUsed: number = data?.usageMetadata?.totalTokenCount ?? 0;
+    return { text, tokensUsed };
+  } catch (err) {
+    clearTimeout(timeoutId);
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error(`Gemini call timed out after ${timeoutMs}ms`);
+    }
+    throw err;
   }
-
-  const data = await response.json();
-  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text;
-  if (!text) throw new Error("Gemini returned empty response");
-
-  const tokensUsed: number = data?.usageMetadata?.totalTokenCount ?? 0;
-  return { text, tokensUsed };
 }
 
 export async function streamGemini(

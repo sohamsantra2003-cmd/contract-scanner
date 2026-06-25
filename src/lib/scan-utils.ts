@@ -23,10 +23,13 @@ export type ScanResult = {
 };
 
 export function cleanContractText(raw: string): string {
-  return raw
+  const cleaned = raw
     .replace(/\n{3,}/g, "\n\n")
     .replace(/^\s*\d+\s*$/gm, "")
-    .replace(/^.{1,4}$/gm, "")
+    // Only strip short lines that contain NO letters — pure noise like page numbers,
+    // dashes, numbering artefacts. The old /^.{1,4}$/ stripped real content like
+    // "IP", "(a)", "or" which caused incomplete text extraction on dense contracts.
+    .replace(/^[\s\d\.\)\(\-_]{1,6}$/gm, "")
     .replace(/^[\s\-_=]{4,}$/gm, "")
     .replace(/(\[[A-Z\s\/\.,]+\][\s\n]*){3,}/g, "[template fields omitted]\n")
     .replace(/^[^|]*(\|[^|]*){2,}$/gm, "")
@@ -34,6 +37,15 @@ export function cleanContractText(raw: string): string {
     .replace(/[ \t]{2,}/g, " ")
     .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
     .trim();
+
+  const stripped = raw.length - cleaned.length;
+  const strippedPct = raw.length > 0 ? Math.round((stripped / raw.length) * 100) : 0;
+  console.log(`[scan] cleaning: ${raw.length} -> ${cleaned.length} chars (${strippedPct}% stripped)`);
+  if (strippedPct > 40) {
+    console.warn(`[scan] ⚠ cleaning stripped over 40% of raw text — investigate if results seem incomplete`);
+  }
+
+  return cleaned;
 }
 
 export function calculateOutputTokens(cleanedTextLength: number): number {

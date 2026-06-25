@@ -1,12 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-
-export const runtime = "nodejs";
-export const maxDuration = 60;
-
-const debug = (...args: unknown[]) => {
-  if (process.env.NODE_ENV !== "production") console.log(...args);
-};
 import { createClient as createAdminClient } from "@supabase/supabase-js";
 import { callGemini } from "@/lib/gemini";
 import {
@@ -24,12 +17,20 @@ import { chunkDocument, buildChunkPrompt } from "@/lib/chunk-document";
 import { PDFParse } from "pdf-parse";
 import { getPath as getPdfWorkerPath } from "pdf-parse/worker";
 
+export const runtime = "nodejs";
+export const maxDuration = 120;
+
 PDFParse.setWorker(getPdfWorkerPath());
 
-const MAX_CHARS = 600000; // ~240 pages — bounds worst-case cost on pathological files
-const PARALLEL_BATCH_SIZE = 5;
-const BATCH_PAUSE_MS = 2500;
-const SCAN_DEADLINE_MS = 45000;
+// ── Scan constants ─────────────────────────────────────────────────────────────
+const MAX_CHARS = 600000;          // ~240 pages upper bound — cost control only
+const PER_ATTEMPT_TIMEOUT_MS = 12000;    // hard abort per Gemini call via AbortController
+const PER_CHUNK_TOTAL_BUDGET_MS = 20000; // outer race — no chunk (incl. retry) blocks > 20s
+const SINGLE_BATCH_THRESHOLD = 15;       // ≤15 chunks → single parallel wave (~45-50 pages)
+const FALLBACK_BATCH_SIZE = 10;          // sequential batches for larger documents
+const FALLBACK_BATCH_PAUSE_MS = 1500;
+
+type ChunkOutcome = { clauses: Clause[]; failed: boolean; rateLimited: boolean };
 
 type ScanResult = {
   id: string;
@@ -41,9 +42,10 @@ type ScanResult = {
   coverage?: { chunksTotal: number; chunksProcessed: number; complete: boolean };
 };
 
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
 function smartTruncate(text: string): { text: string; wasTruncated: boolean; truncatedAt: string } {
   if (text.length <= MAX_CHARS) return { text, wasTruncated: false, truncatedAt: "" };
-
   const annexPatterns = [
     /\nAnnex\s+[A-Z]/i, /\nANNEX\s+[A-Z]/, /\nAppendix\s+[A-Z0-9]/i,
     /\nSCHEDULE\s+[A-Z0-9]/i, /\nExhibit\s+[A-Z0-9]/i, /\nATTACHMENT\s+[A-Z0-9]/i,
@@ -59,7 +61,7 @@ function smartTruncate(text: string): { text: string; wasTruncated: boolean; tru
   const pct = Math.round((text.length - cutPoint) / text.length * 100);
   return {
     text: text.slice(0, cutPoint) +
-      `\n\n[ANALYSIS NOTE: Document truncated at ${cutReason}. ${pct}% of document (${Math.round((text.length - cutPoint) / 1000)}k chars) excluded.]`,
+      `\n\n[ANALYSIS NOTE: Document truncated at ${cutReason}. ${pct}% (${Math.round((text.length - cutPoint) / 1000)}k chars) excluded.]`,
     wasTruncated: true,
     truncatedAt: cutReason,
   };
@@ -75,16 +77,30 @@ function cleanJson(raw: string, arrayMode = false): string {
   return s.trim();
 }
 
-async function callGeminiWithRetry(
-  prompt: string,
-  token: string,
-  outputTokens: number,
-  maxRetries = 2
-): Promise<{ text: string; tokensUsed: number; rateLimited: boolean } | null> {
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+// ── Per-chunk processing ───────────────────────────────────────────────────────
+
+async function processOneChunk(
+  chunk: string,
+  chunkIdx: number,
+  totalChunks: number,
+  token: string
+): Promise<ChunkOutcome> {
+  const prompt = buildChunkPrompt(chunk, chunkIdx, totalChunks);
+  const start = Date.now();
+  const MAX_RETRIES = 1;
+
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     try {
-      const result = await callGemini(prompt, token, outputTokens);
-      return { ...result, rateLimited: false };
+      const { text } = await callGemini(prompt, token, 4096, PER_ATTEMPT_TIMEOUT_MS);
+      const cleaned = cleanJson(text, true);
+      const rawParsed = JSON.parse(cleaned);
+      const rawClauses = Array.isArray(rawParsed) ? rawParsed : [];
+      const validClauses = rawClauses.filter(isValidClause);
+      if (validClauses.length < rawClauses.length) {
+        console.warn(`[scan] chunk ${chunkIdx + 1}/${totalChunks}: dropped ${rawClauses.length - validClauses.length} malformed clause(s)`);
+      }
+      console.log(`[scan] chunk ${chunkIdx + 1}/${totalChunks} ok in ${Date.now() - start}ms (${validClauses.length} clauses)`);
+      return { clauses: validClauses, failed: false, rateLimited: false };
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : String(err);
       const isRateLimited =
@@ -92,21 +108,36 @@ async function callGeminiWithRetry(
         errMsg.toLowerCase().includes("resource_exhausted") ||
         errMsg.toLowerCase().includes("rate limit");
 
-      if (isRateLimited && attempt < maxRetries) {
-        const backoffMs = 3000 * Math.pow(2, attempt);
-        console.error(`[scan] rate limited, backing off ${backoffMs}ms (attempt ${attempt + 1}/${maxRetries + 1})`);
-        await new Promise((r) => setTimeout(r, backoffMs));
+      if (attempt < MAX_RETRIES) {
+        const backoff = isRateLimited ? 3000 : 500;
+        console.warn(`[scan] chunk ${chunkIdx + 1}/${totalChunks} attempt ${attempt + 1} failed (${errMsg.slice(0, 80)}), retrying in ${backoff}ms`);
+        await new Promise((r) => setTimeout(r, backoff));
         continue;
       }
 
-      console.error(`[scan] chunk call failed: ${errMsg}`);
-      return isRateLimited
-        ? { text: "", tokensUsed: 0, rateLimited: true }
-        : null;
+      console.error(`[scan] chunk ${chunkIdx + 1}/${totalChunks} failed after ${Date.now() - start}ms: ${errMsg}`);
+      return { clauses: [], failed: true, rateLimited: isRateLimited };
     }
   }
-  return null;
+  return { clauses: [], failed: true, rateLimited: false };
 }
+
+// Outer race — guarantees no chunk, even with a retry, blocks the wave for more than PER_CHUNK_TOTAL_BUDGET_MS
+async function processOneChunkBounded(
+  chunk: string, chunkIdx: number, totalChunks: number, token: string
+): Promise<ChunkOutcome> {
+  return Promise.race([
+    processOneChunk(chunk, chunkIdx, totalChunks, token),
+    new Promise<ChunkOutcome>((resolve) =>
+      setTimeout(() => {
+        console.warn(`[scan] chunk ${chunkIdx + 1}/${totalChunks} exceeded outer budget (${PER_CHUNK_TOTAL_BUDGET_MS}ms) — skipping`);
+        resolve({ clauses: [], failed: true, rateLimited: false });
+      }, PER_CHUNK_TOTAL_BUDGET_MS)
+    ),
+  ]);
+}
+
+// ── Main handler ───────────────────────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
@@ -131,13 +162,11 @@ export async function POST(request: NextRequest) {
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
 
-  const { data: userRecord } = await adminSupabase.from("users").select("scans_used, tier").eq("id", user.id).single();
-  debug(`[scan] scans_used=${userRecord?.scans_used} tier=${userRecord?.tier}`);
-
   if (contract.status === "scanning") {
     return NextResponse.json({ error: "Scan already in progress" }, { status: 409 });
   }
 
+  // Return cached result for completed scans
   if (contract.status === "complete") {
     const { data: existingScan } = await supabase
       .from("scans").select("*").eq("contract_id", contractId)
@@ -159,6 +188,7 @@ export async function POST(request: NextRequest) {
 
   await supabase.from("contracts").update({ status: "scanning" }).eq("id", contractId);
 
+  // ── Parallel: PDF download + token prefetch ──────────────────────────────────
   const storagePath = contract.file_url.split("/storage/v1/object/public/contracts/")[1];
   let pdfBuffer: ArrayBuffer;
   let geminiToken: string;
@@ -179,6 +209,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Could not access contract file." }, { status: 500 });
   }
 
+  // ── PDF text extraction ──────────────────────────────────────────────────────
   let rawText: string;
   let numpages: number;
   try {
@@ -207,6 +238,7 @@ export async function POST(request: NextRequest) {
     }, { status: 422 });
   }
 
+  // ── Clean + route ────────────────────────────────────────────────────────────
   const cleanedText = cleanContractText(rawText);
   const mode = getAnalysisMode(cleanedText.length);
   const outputTokens = calculateOutputTokens(cleanedText.length);
@@ -214,35 +246,33 @@ export async function POST(request: NextRequest) {
   const { text: finalText, wasTruncated, truncatedAt } =
     mode === "chunked" ? { text: cleanedText, wasTruncated: false, truncatedAt: "" } : smartTruncate(cleanedText);
 
-  debug(`[scan] mode=${mode} inputChars=${cleanedText.length} finalChars=${finalText.length} truncated=${wasTruncated} truncatedAt=${truncatedAt} outputTokens=${outputTokens}`);
+  console.log(`[scan] mode=${mode} pages=${numpages} inputChars=${cleanedText.length} finalChars=${finalText.length} truncated=${wasTruncated}${truncatedAt ? ` at=${truncatedAt}` : ""}`);
 
   let parsedResult: { summary: string; risk_score: number; clauses: Clause[] } | null = null;
   let coverage = { chunksTotal: 1, chunksProcessed: 1, complete: true };
 
   // ── SINGLE PASS ──────────────────────────────────────────────────────────────
   if (mode === "single") {
-    const TIMEOUT_MS = process.env.NODE_ENV === "production" ? 55000 : 30000;
-
     for (let attempt = 0; attempt < 2; attempt++) {
       const prompt = attempt === 0
         ? buildScanPrompt(finalText)
-        : buildScanPrompt(finalText) + '\n\nCRITICAL: Return ONLY the raw JSON object. Start with { end with }. No backticks. No explanation.';
+        : buildScanPrompt(finalText) + "\n\nCRITICAL: Return ONLY the raw JSON object. Start with { end with }. No backticks. No explanation.";
 
       let raw = "";
       try {
-        const timeout = new Promise<never>((_, reject) =>
-          setTimeout(() => { const e = new Error("timed out"); e.name = "AbortError"; reject(e); }, TIMEOUT_MS)
-        );
-        const { text } = await Promise.race([callGemini(prompt, geminiToken, outputTokens), timeout]);
+        const { text } = await callGemini(prompt, geminiToken, outputTokens, 55000);
         raw = text;
       } catch (error) {
-        await supabase.from("contracts").update({ status: "error" }).eq("id", contractId);
         const err = error as Error;
-        if (err.message.includes("429")) {
+        if (err.message.includes("429") || err.message.toLowerCase().includes("resource_exhausted")) {
           await supabase.from("contracts").update({ status: "pending" }).eq("id", contractId);
           return NextResponse.json({ error: "Analysis temporarily unavailable. Please try again in a few minutes." }, { status: 503 });
         }
-        if (err.name === "AbortError") return NextResponse.json({ error: "Analysis timed out. Please try again." }, { status: 504 });
+        if (err.message.includes("timed out")) {
+          await supabase.from("contracts").update({ status: "error" }).eq("id", contractId);
+          return NextResponse.json({ error: "Analysis timed out. Please try again." }, { status: 504 });
+        }
+        await supabase.from("contracts").update({ status: "error" }).eq("id", contractId);
         return NextResponse.json({ error: "Analysis failed. Please try again." }, { status: 500 });
       }
 
@@ -251,7 +281,7 @@ export async function POST(request: NextRequest) {
         if (!Array.isArray(p.clauses)) throw new Error("clauses not array");
         const validClauses = p.clauses.filter(isValidClause);
         if (validClauses.length < p.clauses.length) {
-          console.warn(`[scan] dropped ${p.clauses.length - validClauses.length} malformed clause object(s) from single-pass`);
+          console.warn(`[scan] dropped ${p.clauses.length - validClauses.length} malformed clause(s) from single-pass`);
         }
         parsedResult = { ...p, clauses: validClauses };
         break;
@@ -270,69 +300,65 @@ export async function POST(request: NextRequest) {
   else {
     const chunks = chunkDocument(finalText, 10000, 500);
     const totalChunks = chunks.length;
-    debug(`[scan] chunked: ${totalChunks} chunks from ${finalText.length} chars`);
+    const strategy = totalChunks <= SINGLE_BATCH_THRESHOLD ? "single parallel wave" : `sequential batches of ${FALLBACK_BATCH_SIZE}`;
+    console.log(`[scan] ${totalChunks} chunks from ${finalText.length} chars — ${strategy}`);
 
     let allClauses: Clause[] = [];
     let chunksProcessed = 0;
-    const scanStartTime = Date.now();
-    let firstBatchAttempted = false;
-    let firstBatchAllFailed = false;
+    let abortWithServiceError = false;
 
-    for (let batchStart = 0; batchStart < chunks.length; batchStart += PARALLEL_BATCH_SIZE) {
-      // ── Wall-clock governor ────────────────────────────────────────────────
-      const elapsed = Date.now() - scanStartTime;
-      if (elapsed > SCAN_DEADLINE_MS) {
-        console.warn(`[scan] deadline reached at ${elapsed}ms with ${chunksProcessed}/${totalChunks} chunks — stopping early, proceeding to synthesis with partial results`);
-        break;
-      }
-
-      const batch = chunks.slice(batchStart, batchStart + PARALLEL_BATCH_SIZE);
-      const batchResults = await Promise.all(
-        batch.map(async (chunk, batchIdx) => {
-          const chunkIdx = batchStart + batchIdx;
-          const result = await callGeminiWithRetry(buildChunkPrompt(chunk, chunkIdx, totalChunks), geminiToken, 4096);
-
-          if (result === null) return { clauses: [] as Clause[], failed: true, rateLimited: false };
-          if (result.rateLimited) return { clauses: [] as Clause[], failed: true, rateLimited: true };
-
-          try {
-            const cleaned = cleanJson(result.text, true);
-            const rawParsed = JSON.parse(cleaned);
-            const rawClauses = Array.isArray(rawParsed) ? rawParsed : [];
-            const validClauses = rawClauses.filter(isValidClause);
-            if (validClauses.length < rawClauses.length) {
-              console.warn(`[scan] dropped ${rawClauses.length - validClauses.length} malformed clause object(s) from chunk ${chunkIdx}`);
-            }
-            debug(`[scan] chunk ${chunkIdx + 1}/${totalChunks}: ${validClauses.length} valid clauses`);
-            return { clauses: validClauses, failed: false, rateLimited: false };
-          } catch {
-            return { clauses: [] as Clause[], failed: true, rateLimited: false };
-          }
-        })
+    if (totalChunks <= SINGLE_BATCH_THRESHOLD) {
+      // ── Single parallel wave — all chunks run simultaneously ─────────────────
+      // This is the key fix: for ≤15 chunks (up to ~45-50 pages), we send everything
+      // at once. Duration is bounded by the slowest single chunk (≤20s), not by
+      // sequential batching multiplied by the number of batches.
+      const results = await Promise.all(
+        chunks.map((chunk, idx) => processOneChunkBounded(chunk, idx, totalChunks, geminiToken))
       );
 
-      // ── Fail-fast circuit breaker ──────────────────────────────────────────
-      if (!firstBatchAttempted) {
-        firstBatchAttempted = true;
-        const nonRateLimitFailures = batchResults.filter((r) => r.failed && !r.rateLimited).length;
-        if (nonRateLimitFailures === batchResults.length) {
-          console.error("[scan] first batch entirely failed with non-rate-limit errors — aborting (AI_SERVICE_ERROR)");
-          firstBatchAllFailed = true;
-          break;
-        }
+      // Circuit breaker: all chunks failed for non-rate-limit reasons → genuine outage
+      const allFailedNonRateLimit = totalChunks > 0 && results.every((r) => r.failed && !r.rateLimited);
+      if (allFailedNonRateLimit) {
+        console.error("[scan] all chunks failed with non-rate-limit errors — aborting (AI_SERVICE_ERROR)");
+        abortWithServiceError = true;
+      } else {
+        results.forEach((r) => {
+          allClauses = [...allClauses, ...r.clauses];
+          if (!r.failed) chunksProcessed++;
+          else if (r.rateLimited) chunksProcessed++; // attempted, even if empty
+        });
       }
+    } else {
+      // ── Sequential fallback for very large documents (>~50 pages) ────────────
+      for (let batchStart = 0; batchStart < chunks.length; batchStart += FALLBACK_BATCH_SIZE) {
+        const batch = chunks.slice(batchStart, batchStart + FALLBACK_BATCH_SIZE);
+        const results = await Promise.all(
+          batch.map((chunk, i) => processOneChunkBounded(chunk, batchStart + i, totalChunks, geminiToken))
+        );
 
-      batchResults.forEach((r) => {
-        allClauses = [...allClauses, ...r.clauses];
-        chunksProcessed++;
-      });
+        // Circuit breaker on first batch only
+        if (batchStart === 0) {
+          const allFirstFailed = batch.length > 0 && results.every((r) => r.failed && !r.rateLimited);
+          if (allFirstFailed) {
+            console.error("[scan] first batch entirely failed — aborting (AI_SERVICE_ERROR)");
+            abortWithServiceError = true;
+            break;
+          }
+        }
 
-      if (batchStart + PARALLEL_BATCH_SIZE < chunks.length) {
-        await new Promise((r) => setTimeout(r, BATCH_PAUSE_MS));
+        results.forEach((r) => {
+          allClauses = [...allClauses, ...r.clauses];
+          if (!r.failed) chunksProcessed++;
+          else if (r.rateLimited) chunksProcessed++;
+        });
+
+        if (batchStart + FALLBACK_BATCH_SIZE < chunks.length) {
+          await new Promise((r) => setTimeout(r, FALLBACK_BATCH_PAUSE_MS));
+        }
       }
     }
 
-    if (firstBatchAllFailed) {
+    if (abortWithServiceError) {
       await adminSupabase.from("contracts").update({ status: "pending" }).eq("id", contractId);
       return NextResponse.json({
         error: "The AI analysis service is currently unavailable. Please try again in a few minutes.",
@@ -342,14 +368,15 @@ export async function POST(request: NextRequest) {
 
     coverage = { chunksTotal: totalChunks, chunksProcessed, complete: chunksProcessed === totalChunks };
     const clauses = deduplicateClauses(allClauses);
-    debug(`[scan] chunked complete: ${totalChunks} chunks, ${chunksProcessed} processed, ${allClauses.length} raw, ${clauses.length} after dedup, coverage.complete=${coverage.complete}`);
+    console.log(`[scan] complete: ${totalChunks} chunks, ${chunksProcessed} processed, ${allClauses.length} raw clauses, ${clauses.length} after dedup, coverage.complete=${coverage.complete}`);
 
+    // Synthesis
     let summaryData = { summary: "", risk_score: 0 };
     try {
       const { text: rawSum } = await callGemini(buildSynthesisPrompt(clauses), geminiToken, 1024);
       summaryData = JSON.parse(cleanJson(rawSum));
     } catch (e) {
-      console.error(`[scan] chunked synthesis failed: ${e}`);
+      console.error(`[scan] synthesis failed: ${e}`);
       const h = clauses.filter((c) => c.severity === "high").length;
       const m = clauses.filter((c) => c.severity === "medium").length;
       const l = clauses.filter((c) => c.severity === "low").length;
@@ -373,6 +400,7 @@ export async function POST(request: NextRequest) {
   const low = parsedResult.clauses.filter((c) => c.severity === "low").length;
   const finalScore = Math.min(100, high * 20 + medium * 8 + low * 2);
 
+  // ── Persist ───────────────────────────────────────────────────────────────────
   const { data: scan, error: scanError } = await adminSupabase
     .from("scans")
     .insert({
