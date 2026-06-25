@@ -63,8 +63,6 @@ async function extractAllPositionedItems(
         allPages.push([]);
       }
     }
-    // TODO: remove this log once highlighting is confirmed working
-    console.log("[PDFHighlight] Page 1 item count:", allPages[0]?.length ?? 0, "sample:", allPages[0]?.[0]);
     onExtracted(allPages);
   } catch {
     // non-critical
