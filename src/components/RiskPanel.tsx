@@ -1,6 +1,6 @@
 "use client";
 
-import { useReducer, useState, useEffect, useRef } from "react";
+import { useReducer, useState, useEffect, useRef, useCallback } from "react";
 import { Copy, Check, Download, RefreshCw, ScanLine, Lock, FileWarning, Clock, Zap } from "lucide-react";
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -199,9 +199,10 @@ interface ClauseCardProps {
   isActive: boolean;
   targetPage: number | null;
   onClick: () => void;
+  cardRef?: (el: HTMLDivElement | null) => void;
 }
 
-function ClauseCard({ clause, isActive, targetPage, onClick }: ClauseCardProps) {
+function ClauseCard({ clause, isActive, targetPage, onClick, cardRef }: ClauseCardProps) {
   const [expanded, setExpanded] = useState(false);
   const isLong = clause.text.length > 200;
   const sColor = severityColor(clause.severity);
@@ -210,6 +211,7 @@ function ClauseCard({ clause, isActive, targetPage, onClick }: ClauseCardProps) 
 
   return (
     <div
+      ref={cardRef}
       onClick={onClick}
       className="card"
       style={{
@@ -455,6 +457,9 @@ interface RiskPanelProps {
   onScanEnd?: () => void;
   onScanComplete?: (scan: ScanResult) => void;
   onRegisterRescan?: (fn: () => void) => void;
+  // Bidirectional highlight sync
+  externalActiveClauseIndex?: number | null;
+  onClauseActivated?: (clauseIdx: number) => void;
 }
 
 export function RiskPanel({
@@ -469,6 +474,8 @@ export function RiskPanel({
   onScanEnd,
   onScanComplete,
   onRegisterRescan,
+  externalActiveClauseIndex,
+  onClauseActivated,
 }: RiskPanelProps) {
   const [state, dispatch] = useReducer(
     reducer,
@@ -481,7 +488,9 @@ export function RiskPanel({
 
   const [activeCategory, setActiveCategory] = useState<string>("all");
   const [activeSeverity, setActiveSeverity] = useState<string>("all");
+  // Tracks the ORIGINAL scan.clauses index (not the filtered array index)
   const [activeClauseIndex, setActiveClauseIndex] = useState<number | null>(null);
+  const clauseCardRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const [scanStatusMessage, setScanStatusMessage] = useState("Connecting to Gemini...");
   const [streamingText, setStreamingText] = useState("");
   const [chunkProgress, setChunkProgress] = useState<{ completed: number; total: number } | null>(null);
@@ -490,6 +499,13 @@ export function RiskPanel({
     setActiveSeverity("all");
     setActiveClauseIndex(null);
   }, [activeCategory]);
+
+  useEffect(() => {
+    if (externalActiveClauseIndex === null || externalActiveClauseIndex === undefined) return;
+    setActiveClauseIndex(externalActiveClauseIndex);
+    const el = clauseCardRefs.current.get(externalActiveClauseIndex);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [externalActiveClauseIndex]);
 
   // ── Core SSE fetch ────────────────────────────────────────────────────────────
   async function runScan() {
@@ -891,19 +907,27 @@ export function RiskPanel({
             </button>
           </div>
         ) : (
-          filtered.map((clause, i) => (
-            <ClauseCard
-              key={i}
-              clause={clause}
-              isActive={activeClauseIndex === i}
-              targetPage={targetPages[i]}
-              onClick={() => {
-                setActiveClauseIndex(i);
-                const page = targetPages[i];
-                if (page !== null) onClauseClick?.(page);
-              }}
-            />
-          ))
+          filtered.map((clause, i) => {
+            const originalIdx = scan.clauses.indexOf(clause);
+            return (
+              <ClauseCard
+                key={originalIdx}
+                clause={clause}
+                isActive={activeClauseIndex === originalIdx}
+                targetPage={targetPages[i]}
+                cardRef={(el) => {
+                  if (el) clauseCardRefs.current.set(originalIdx, el);
+                  else clauseCardRefs.current.delete(originalIdx);
+                }}
+                onClick={() => {
+                  setActiveClauseIndex(originalIdx);
+                  const page = targetPages[i];
+                  if (page !== null) onClauseClick?.(page);
+                  onClauseActivated?.(originalIdx);
+                }}
+              />
+            );
+          })
         )}
       </div>
 

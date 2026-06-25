@@ -1,12 +1,18 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { PDFViewer } from "@/components/PDFViewer";
 import { RiskPanel } from "@/components/RiskPanel";
 import { DeleteContractButton } from "@/components/DeleteContractButton";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { exportScanReport } from "@/lib/export-pdf";
+import {
+  type PositionedTextItem,
+  type HighlightRect,
+  findClausePage,
+  findBestRectsAcrossPages,
+} from "@/lib/pdf-positions";
 
 type Clause = {
   text: string;
@@ -66,6 +72,54 @@ export default function ContractViewer({
   const [isMobile, setIsMobile] = useState(false);
   const [currentScan, setCurrentScan] = useState<ScanResult | null>(initialScan);
   const [rescanFn, setRescanFn] = useState<(() => void) | null>(null);
+
+  // Highlighting state
+  const [allPositionedItems, setAllPositionedItems] = useState<PositionedTextItem[][]>([]);
+  const [activeClauseId, setActiveClauseId] = useState<string | null>(null);
+  // When a highlight rect is clicked, this tells RiskPanel to scroll to that clause card
+  const [externalScrollIdx, setExternalScrollIdx] = useState<number | null>(null);
+
+  // Compute clause→rect mapping once when scan + positioned items are both ready
+  const clauseRects = useMemo(() => {
+    if (!currentScan?.clauses?.length || !allPositionedItems.length || !pageTexts.length) return {};
+    const result: Record<string, HighlightRect[]> = {};
+    currentScan.clauses.forEach((clause, idx) => {
+      const clauseId = `clause-${idx}`;
+      const targetPage = findClausePage(clause.text, pageTexts);
+      result[clauseId] = findBestRectsAcrossPages(clause.text, allPositionedItems, targetPage);
+    });
+    return result;
+  }, [currentScan?.clauses, allPositionedItems, pageTexts]);
+
+  // Filter down to rects on the currently visible page
+  const rectsForCurrentPage = useMemo(() => {
+    const rects: HighlightRect[] = [];
+    const clauseIds: string[] = [];
+    const severities: string[] = [];
+    Object.entries(clauseRects).forEach(([clauseId, clauseRectList]) => {
+      clauseRectList
+        .filter((r) => r.page === currentPage)
+        .forEach((r) => {
+          rects.push(r);
+          clauseIds.push(clauseId);
+          const clauseIdx = parseInt(clauseId.split("-")[1]);
+          severities.push(currentScan?.clauses[clauseIdx]?.severity ?? "low");
+        });
+    });
+    return { rects, clauseIds, severities };
+  }, [clauseRects, currentPage, currentScan]);
+
+  // Clause card clicked → set active highlight
+  const handleClauseActivated = useCallback((idx: number) => {
+    setActiveClauseId(`clause-${idx}`);
+  }, []);
+
+  // Highlight rect clicked → set active + scroll RiskPanel to that clause card
+  const handleHighlightClick = useCallback((clauseId: string) => {
+    setActiveClauseId(clauseId);
+    const idx = parseInt(clauseId.split("-")[1]);
+    if (!isNaN(idx)) setExternalScrollIdx(idx);
+  }, []);
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768);
@@ -171,7 +225,13 @@ export default function ContractViewer({
             currentPage={currentPage}
             onPageChange={setCurrentPage}
             onTextExtracted={setPageTexts}
+            onPositionedTextExtracted={setAllPositionedItems}
             isScanning={isScanning}
+            highlightRects={rectsForCurrentPage.rects}
+            highlightClauseIds={rectsForCurrentPage.clauseIds}
+            highlightSeverities={rectsForCurrentPage.severities}
+            activeClauseId={activeClauseId}
+            onHighlightClick={handleHighlightClick}
           />
         </div>
 
@@ -219,6 +279,8 @@ export default function ContractViewer({
                 onScanEnd={() => setIsScanning(false)}
                 onScanComplete={(scan) => setCurrentScan(scan)}
                 onRegisterRescan={(fn) => setRescanFn(() => fn)}
+                externalActiveClauseIndex={externalScrollIdx}
+                onClauseActivated={handleClauseActivated}
               />
               <div style={{ marginTop: 20, padding: "12px 0", borderTop: "1px solid var(--bd-subtle)" }}>
                 <p style={{ fontSize: 11, fontWeight: 600, color: "var(--tx-muted)", marginBottom: 10, letterSpacing: "0.06em", textTransform: "uppercase" }}>
@@ -250,7 +312,13 @@ export default function ContractViewer({
             currentPage={currentPage}
             onPageChange={setCurrentPage}
             onTextExtracted={setPageTexts}
+            onPositionedTextExtracted={setAllPositionedItems}
             isScanning={isScanning}
+            highlightRects={rectsForCurrentPage.rects}
+            highlightClauseIds={rectsForCurrentPage.clauseIds}
+            highlightSeverities={rectsForCurrentPage.severities}
+            activeClauseId={activeClauseId}
+            onHighlightClick={handleHighlightClick}
           />
         </div>
 
@@ -272,6 +340,8 @@ export default function ContractViewer({
               onScanEnd={() => setIsScanning(false)}
               onScanComplete={(scan) => setCurrentScan(scan)}
               onRegisterRescan={(fn) => setRescanFn(() => fn)}
+              externalActiveClauseIndex={externalScrollIdx}
+              onClauseActivated={handleClauseActivated}
             />
           </div>
           <div style={{ padding: "14px 22px 18px", borderTop: "1px solid var(--bd-subtle)" }}>
