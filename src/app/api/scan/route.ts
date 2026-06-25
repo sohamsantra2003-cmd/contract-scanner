@@ -12,12 +12,12 @@ import { callGemini } from "@/lib/gemini";
 import {
   cleanContractText,
   buildScanPrompt,
-  buildClausesOnlyPrompt,
   buildSynthesisPrompt,
   deduplicateClauses,
   getAnalysisMode,
   calculateOutputTokens,
   prefetchGeminiToken,
+  isValidClause,
   type Clause,
 } from "@/lib/scan-utils";
 import { chunkDocument, buildChunkPrompt } from "@/lib/chunk-document";
@@ -26,8 +26,10 @@ import { getPath as getPdfWorkerPath } from "pdf-parse/worker";
 
 PDFParse.setWorker(getPdfWorkerPath());
 
-const MAX_CHARS = 120000;
-const PARALLEL_BATCH_SIZE = 10;
+const MAX_CHARS = 600000; // ~240 pages — bounds worst-case cost on pathological files
+const PARALLEL_BATCH_SIZE = 5;
+const BATCH_PAUSE_MS = 2500;
+const SCAN_DEADLINE_MS = 45000;
 
 type ScanResult = {
   id: string;
@@ -36,6 +38,7 @@ type ScanResult = {
   clauses: Clause[];
   tokens_used: number;
   scanned_at: string;
+  coverage?: { chunksTotal: number; chunksProcessed: number; complete: boolean };
 };
 
 function smartTruncate(text: string): { text: string; wasTruncated: boolean; truncatedAt: string } {
@@ -70,6 +73,39 @@ function cleanJson(raw: string, arrayMode = false): string {
     s = s.replace(/^[^{]*({)/, "$1").replace(/(})[^}]*$/, "$1");
   }
   return s.trim();
+}
+
+async function callGeminiWithRetry(
+  prompt: string,
+  token: string,
+  outputTokens: number,
+  maxRetries = 2
+): Promise<{ text: string; tokensUsed: number; rateLimited: boolean } | null> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const result = await callGemini(prompt, token, outputTokens);
+      return { ...result, rateLimited: false };
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const isRateLimited =
+        errMsg.includes("429") ||
+        errMsg.toLowerCase().includes("resource_exhausted") ||
+        errMsg.toLowerCase().includes("rate limit");
+
+      if (isRateLimited && attempt < maxRetries) {
+        const backoffMs = 3000 * Math.pow(2, attempt);
+        console.error(`[scan] rate limited, backing off ${backoffMs}ms (attempt ${attempt + 1}/${maxRetries + 1})`);
+        await new Promise((r) => setTimeout(r, backoffMs));
+        continue;
+      }
+
+      console.error(`[scan] chunk call failed: ${errMsg}`);
+      return isRateLimited
+        ? { text: "", tokensUsed: 0, rateLimited: true }
+        : null;
+    }
+  }
+  return null;
 }
 
 export async function POST(request: NextRequest) {
@@ -111,6 +147,11 @@ export async function POST(request: NextRequest) {
         id: existingScan.id, risk_score: existingScan.risk_score,
         summary: existingScan.summary, clauses: existingScan.risk_json as Clause[],
         tokens_used: existingScan.tokens_used, scanned_at: existingScan.scanned_at,
+        coverage: {
+          chunksTotal: existingScan.chunks_total ?? 1,
+          chunksProcessed: existingScan.chunks_processed ?? 1,
+          complete: existingScan.coverage_complete ?? true,
+        },
       };
       return NextResponse.json({ scan: result });
     }
@@ -118,7 +159,6 @@ export async function POST(request: NextRequest) {
 
   await supabase.from("contracts").update({ status: "scanning" }).eq("id", contractId);
 
-  // ── Parallel: PDF download + Gemini token ────────────────────────────────
   const storagePath = contract.file_url.split("/storage/v1/object/public/contracts/")[1];
   let pdfBuffer: ArrayBuffer;
   let geminiToken: string;
@@ -139,7 +179,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: err instanceof Error ? err.message : "Could not access contract file." }, { status: 500 });
   }
 
-  // ── Extract text (Fix C + D) ──────────────────────────────────────────────
   let rawText: string;
   let numpages: number;
   try {
@@ -159,7 +198,6 @@ export async function POST(request: NextRequest) {
     }, { status: 422 });
   }
 
-  // Fix C: scanned image PDF detection
   const charsPerPage = rawText.length / numpages;
   if (rawText.length < 50 || (charsPerPage < 40 && numpages > 1)) {
     await supabase.from("contracts").update({ status: "error" }).eq("id", contractId);
@@ -169,22 +207,19 @@ export async function POST(request: NextRequest) {
     }, { status: 422 });
   }
 
-  // ── Clean + truncate ─────────────────────────────────────────────────────
   const cleanedText = cleanContractText(rawText);
   const mode = getAnalysisMode(cleanedText.length);
   const outputTokens = calculateOutputTokens(cleanedText.length);
 
-  // For chunked mode: process original text in chunks (no truncation needed)
-  // For single/two-pass: truncate to MAX_CHARS
   const { text: finalText, wasTruncated, truncatedAt } =
     mode === "chunked" ? { text: cleanedText, wasTruncated: false, truncatedAt: "" } : smartTruncate(cleanedText);
 
   debug(`[scan] mode=${mode} inputChars=${cleanedText.length} finalChars=${finalText.length} truncated=${wasTruncated} truncatedAt=${truncatedAt} outputTokens=${outputTokens}`);
 
-  // ── Analysis mode router ─────────────────────────────────────────────────
   let parsedResult: { summary: string; risk_score: number; clauses: Clause[] } | null = null;
+  let coverage = { chunksTotal: 1, chunksProcessed: 1, complete: true };
 
-  // ── SINGLE PASS ──────────────────────────────────────────────────────────
+  // ── SINGLE PASS ──────────────────────────────────────────────────────────────
   if (mode === "single") {
     const TIMEOUT_MS = process.env.NODE_ENV === "production" ? 55000 : 30000;
 
@@ -214,7 +249,11 @@ export async function POST(request: NextRequest) {
       try {
         const p = JSON.parse(cleanJson(raw));
         if (!Array.isArray(p.clauses)) throw new Error("clauses not array");
-        parsedResult = p;
+        const validClauses = p.clauses.filter(isValidClause);
+        if (validClauses.length < p.clauses.length) {
+          console.warn(`[scan] dropped ${p.clauses.length - validClauses.length} malformed clause object(s) from single-pass`);
+        }
+        parsedResult = { ...p, clauses: validClauses };
         break;
       } catch (e) {
         console.error(`[scan] single-pass parse failed attempt ${attempt + 1}: ${e}`);
@@ -227,81 +266,83 @@ export async function POST(request: NextRequest) {
     }
   }
 
-  // ── TWO PASS ─────────────────────────────────────────────────────────────
-  else if (mode === "two-pass") {
-    let clauses: Clause[] = [];
-
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const prompt = attempt === 0
-        ? buildClausesOnlyPrompt(finalText)
-        : buildClausesOnlyPrompt(finalText) + "\n\nCRITICAL: Return ONLY a JSON array starting with [ and ending with ]. No wrapper object.";
-      try {
-        const { text: raw } = await callGemini(prompt, geminiToken, 16000);
-        debug(`[scan] pass1 attempt=${attempt + 1} rawLength=${raw.length}`);
-        const p = JSON.parse(cleanJson(raw, true));
-        clauses = Array.isArray(p) ? p : (Array.isArray(p.clauses) ? p.clauses : []);
-        debug(`[scan] pass1 clauses=${clauses.length}`);
-        break;
-      } catch (e) {
-        console.error(`[scan] pass1 attempt ${attempt + 1} failed: ${e}`);
-        if (attempt >= 1) clauses = [];
-        else await new Promise((r) => setTimeout(r, 1500));
-      }
-    }
-
-    clauses = deduplicateClauses(clauses);
-
-    let summaryData = { summary: "", risk_score: 0 };
-    try {
-      const { text: rawSum } = await callGemini(buildSynthesisPrompt(clauses), geminiToken, 1024);
-      debug(`[scan] pass2 rawLength=${rawSum.length}`);
-      summaryData = JSON.parse(cleanJson(rawSum));
-    } catch (e) {
-      console.error(`[scan] pass2 failed: ${e}`);
-      const h = clauses.filter((c) => c.severity === "high").length;
-      const m = clauses.filter((c) => c.severity === "medium").length;
-      const l = clauses.filter((c) => c.severity === "low").length;
-      summaryData = {
-        risk_score: Math.min(100, h * 20 + m * 8 + l * 2),
-        summary: `This contract contains ${clauses.length} risk areas: ${h} high-severity, ${m} medium-severity, and ${l} low-severity clauses that warrant careful review before signing.`,
-      };
-    }
-
-    parsedResult = { summary: summaryData.summary, risk_score: summaryData.risk_score, clauses };
-  }
-
-  // ── CHUNKED (Phase 2) ────────────────────────────────────────────────────
+  // ── CHUNKED ───────────────────────────────────────────────────────────────────
   else {
     const chunks = chunkDocument(finalText, 10000, 500);
-    debug(`[scan] chunked: ${chunks.length} chunks from ${finalText.length} chars`);
+    const totalChunks = chunks.length;
+    debug(`[scan] chunked: ${totalChunks} chunks from ${finalText.length} chars`);
 
     let allClauses: Clause[] = [];
+    let chunksProcessed = 0;
+    const scanStartTime = Date.now();
+    let firstBatchAttempted = false;
+    let firstBatchAllFailed = false;
 
     for (let batchStart = 0; batchStart < chunks.length; batchStart += PARALLEL_BATCH_SIZE) {
+      // ── Wall-clock governor ────────────────────────────────────────────────
+      const elapsed = Date.now() - scanStartTime;
+      if (elapsed > SCAN_DEADLINE_MS) {
+        console.warn(`[scan] deadline reached at ${elapsed}ms with ${chunksProcessed}/${totalChunks} chunks — stopping early, proceeding to synthesis with partial results`);
+        break;
+      }
+
       const batch = chunks.slice(batchStart, batchStart + PARALLEL_BATCH_SIZE);
       const batchResults = await Promise.all(
         batch.map(async (chunk, batchIdx) => {
-          const idx = batchStart + batchIdx;
+          const chunkIdx = batchStart + batchIdx;
+          const result = await callGeminiWithRetry(buildChunkPrompt(chunk, chunkIdx, totalChunks), geminiToken, 4096);
+
+          if (result === null) return { clauses: [] as Clause[], failed: true, rateLimited: false };
+          if (result.rateLimited) return { clauses: [] as Clause[], failed: true, rateLimited: true };
+
           try {
-            const { text: raw } = await callGemini(buildChunkPrompt(chunk, idx, chunks.length), geminiToken, 4096);
-            const p = JSON.parse(cleanJson(raw, true));
-            const found = Array.isArray(p) ? p : [];
-            debug(`[scan] chunk ${idx + 1}/${chunks.length}: ${found.length} clauses`);
-            return found as Clause[];
-          } catch (e) {
-            console.error(`[scan] chunk ${idx + 1} failed: ${e}`);
-            return [] as Clause[];
+            const cleaned = cleanJson(result.text, true);
+            const rawParsed = JSON.parse(cleaned);
+            const rawClauses = Array.isArray(rawParsed) ? rawParsed : [];
+            const validClauses = rawClauses.filter(isValidClause);
+            if (validClauses.length < rawClauses.length) {
+              console.warn(`[scan] dropped ${rawClauses.length - validClauses.length} malformed clause object(s) from chunk ${chunkIdx}`);
+            }
+            debug(`[scan] chunk ${chunkIdx + 1}/${totalChunks}: ${validClauses.length} valid clauses`);
+            return { clauses: validClauses, failed: false, rateLimited: false };
+          } catch {
+            return { clauses: [] as Clause[], failed: true, rateLimited: false };
           }
         })
       );
-      allClauses = [...allClauses, ...batchResults.flat()];
+
+      // ── Fail-fast circuit breaker ──────────────────────────────────────────
+      if (!firstBatchAttempted) {
+        firstBatchAttempted = true;
+        const nonRateLimitFailures = batchResults.filter((r) => r.failed && !r.rateLimited).length;
+        if (nonRateLimitFailures === batchResults.length) {
+          console.error("[scan] first batch entirely failed with non-rate-limit errors — aborting (AI_SERVICE_ERROR)");
+          firstBatchAllFailed = true;
+          break;
+        }
+      }
+
+      batchResults.forEach((r) => {
+        allClauses = [...allClauses, ...r.clauses];
+        chunksProcessed++;
+      });
+
       if (batchStart + PARALLEL_BATCH_SIZE < chunks.length) {
-        await new Promise((r) => setTimeout(r, 500));
+        await new Promise((r) => setTimeout(r, BATCH_PAUSE_MS));
       }
     }
 
+    if (firstBatchAllFailed) {
+      await adminSupabase.from("contracts").update({ status: "pending" }).eq("id", contractId);
+      return NextResponse.json({
+        error: "The AI analysis service is currently unavailable. Please try again in a few minutes.",
+        code: "AI_SERVICE_ERROR",
+      }, { status: 503 });
+    }
+
+    coverage = { chunksTotal: totalChunks, chunksProcessed, complete: chunksProcessed === totalChunks };
     const clauses = deduplicateClauses(allClauses);
-    debug(`[scan] chunked dedup: ${allClauses.length} → ${clauses.length}`);
+    debug(`[scan] chunked complete: ${totalChunks} chunks, ${chunksProcessed} processed, ${allClauses.length} raw, ${clauses.length} after dedup, coverage.complete=${coverage.complete}`);
 
     let summaryData = { summary: "", risk_score: 0 };
     try {
@@ -321,19 +362,17 @@ export async function POST(request: NextRequest) {
     parsedResult = { summary: summaryData.summary, risk_score: summaryData.risk_score, clauses };
   }
 
-  // ── Safety net ───────────────────────────────────────────────────────────
+  // ── Safety net ────────────────────────────────────────────────────────────────
   if (!parsedResult || typeof parsedResult.risk_score !== "number" || !Array.isArray(parsedResult.clauses)) {
     await supabase.from("contracts").update({ status: "error" }).eq("id", contractId);
     return NextResponse.json({ error: "AI returned an unreadable response." }, { status: 422 });
   }
 
-  // ── Deterministic score ──────────────────────────────────────────────────
   const high = parsedResult.clauses.filter((c) => c.severity === "high").length;
   const medium = parsedResult.clauses.filter((c) => c.severity === "medium").length;
   const low = parsedResult.clauses.filter((c) => c.severity === "low").length;
   const finalScore = Math.min(100, high * 20 + medium * 8 + low * 2);
 
-  // ── Persist ──────────────────────────────────────────────────────────────
   const { data: scan, error: scanError } = await adminSupabase
     .from("scans")
     .insert({
@@ -343,6 +382,9 @@ export async function POST(request: NextRequest) {
       summary: parsedResult.summary ?? "",
       model_used: "gemini-2.5-flash",
       tokens_used: 0,
+      chunks_total: coverage.chunksTotal,
+      chunks_processed: coverage.chunksProcessed,
+      coverage_complete: coverage.complete,
     })
     .select()
     .single();
@@ -361,6 +403,7 @@ export async function POST(request: NextRequest) {
     id: scan.id, risk_score: finalScore,
     summary: parsedResult.summary, clauses: parsedResult.clauses,
     tokens_used: 0, scanned_at: scan.scanned_at,
+    coverage,
   };
   return NextResponse.json({ scan: result });
 }

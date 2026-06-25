@@ -6,6 +6,8 @@ export interface ChunkResult {
   error: string | null;
 }
 
+const MAX_CHUNKS = 60;
+
 export function chunkDocument(
   text: string,
   chunkSize: number = 10000,
@@ -14,7 +16,7 @@ export function chunkDocument(
   const chunks: string[] = [];
   let start = 0;
 
-  while (start < text.length) {
+  while (start < text.length && chunks.length < MAX_CHUNKS) {
     let end = Math.min(start + chunkSize, text.length);
 
     if (end < text.length) {

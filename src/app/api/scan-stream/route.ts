@@ -9,12 +9,12 @@ import { callGemini, streamGemini } from "@/lib/gemini";
 import {
   cleanContractText,
   buildScanPrompt,
-  buildClausesOnlyPrompt,
   buildSynthesisPrompt,
   deduplicateClauses,
   getAnalysisMode,
   calculateOutputTokens,
   prefetchGeminiToken,
+  isValidClause,
   type Clause,
 } from "@/lib/scan-utils";
 import { chunkDocument, buildChunkPrompt } from "@/lib/chunk-document";
@@ -26,8 +26,10 @@ export const maxDuration = 60;
 
 PDFParse.setWorker(getPdfWorkerPath());
 
-const MAX_CHARS = 120000;
-const PARALLEL_BATCH_SIZE = 10;
+const MAX_CHARS = 600000;
+const PARALLEL_BATCH_SIZE = 5;
+const BATCH_PAUSE_MS = 2500;
+const SCAN_DEADLINE_MS = 45000;
 
 function smartTruncate(text: string): { text: string; wasTruncated: boolean; truncatedAt: string } {
   if (text.length <= MAX_CHARS) return { text, wasTruncated: false, truncatedAt: "" };
@@ -62,6 +64,39 @@ function cleanJson(raw: string, arrayMode = false): string {
   return s.trim();
 }
 
+async function callGeminiWithRetry(
+  prompt: string,
+  token: string,
+  outputTokens: number,
+  maxRetries = 2
+): Promise<{ text: string; tokensUsed: number; rateLimited: boolean } | null> {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const result = await callGemini(prompt, token, outputTokens);
+      return { ...result, rateLimited: false };
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      const isRateLimited =
+        errMsg.includes("429") ||
+        errMsg.toLowerCase().includes("resource_exhausted") ||
+        errMsg.toLowerCase().includes("rate limit");
+
+      if (isRateLimited && attempt < maxRetries) {
+        const backoffMs = 3000 * Math.pow(2, attempt);
+        console.error(`[scan-stream] rate limited, backing off ${backoffMs}ms (attempt ${attempt + 1}/${maxRetries + 1})`);
+        await new Promise((r) => setTimeout(r, backoffMs));
+        continue;
+      }
+
+      console.error(`[scan-stream] chunk call failed: ${errMsg}`);
+      return isRateLimited
+        ? { text: "", tokensUsed: 0, rateLimited: true }
+        : null;
+    }
+  }
+  return null;
+}
+
 export async function POST(req: NextRequest) {
   const encoder = new TextEncoder();
 
@@ -69,7 +104,6 @@ export async function POST(req: NextRequest) {
     return encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   }
 
-  // Declared outside try so the outer catch can reset status on unexpected errors
   let contractId = "";
 
   const stream = new ReadableStream({
@@ -99,8 +133,6 @@ export async function POST(req: NextRequest) {
         if (!contract) { controller.enqueue(sseEvent("error", { message: "Contract not found" })); controller.close(); return; }
 
         // ── Stale scan recovery ──────────────────────────────────────────────
-        // If status is 'scanning' but updated_at is >3 min old, the previous
-        // scan crashed and left it stuck — reset and allow re-scan.
         const now = new Date();
         const contractAge = contract.updated_at ?? contract.created_at;
         const minutesSinceUpdate = contractAge
@@ -112,7 +144,6 @@ export async function POST(req: NextRequest) {
           controller.enqueue(sseEvent("error", { message: "A scan is already in progress for this contract." }));
           controller.close(); return;
         }
-
         if (isStaleScanning) {
           debug(`[scan-stream] stale scan detected (${Math.round(minutesSinceUpdate)}min), resetting`);
           await supabase.from("contracts").update({ status: "pending" }).eq("id", contractId);
@@ -138,7 +169,6 @@ export async function POST(req: NextRequest) {
             prefetchGeminiToken(),
           ]);
         } catch (err) {
-          // Recoverable — user can retry
           await supabase.from("contracts").update({ status: "pending" }).eq("id", contractId);
           controller.enqueue(sseEvent("error", { message: err instanceof Error ? err.message : "Could not access contract file." }));
           controller.close(); return;
@@ -155,7 +185,6 @@ export async function POST(req: NextRequest) {
         } catch (pdfErr) {
           const errMsg = pdfErr instanceof Error ? pdfErr.message.toLowerCase() : String(pdfErr).toLowerCase();
           const isEncrypted = errMsg.includes("password") || errMsg.includes("encrypt") || errMsg.includes("protect") || errMsg.includes("decrypt");
-          // Unrecoverable — file itself is the problem
           await supabase.from("contracts").update({ status: "error" }).eq("id", contractId);
           controller.enqueue(sseEvent("error", {
             message: isEncrypted ? "PASSWORD_PROTECTED" : "PDF_PARSE_ERROR",
@@ -166,7 +195,6 @@ export async function POST(req: NextRequest) {
           controller.close(); return;
         }
 
-        // Unrecoverable — no text layer
         const charsPerPage = rawText.length / numpages;
         if (rawText.length < 50 || (charsPerPage < 40 && numpages > 1)) {
           await supabase.from("contracts").update({ status: "error" }).eq("id", contractId);
@@ -188,6 +216,7 @@ export async function POST(req: NextRequest) {
         debug(`[scan-stream] mode=${mode} inputChars=${cleanedText.length} finalChars=${finalText.length} truncated=${wasTruncated} truncatedAt=${truncatedAt} outputTokens=${outputTokens}`);
 
         let parsedResult: { summary: string; risk_score: number; clauses: Clause[] } | null = null;
+        let coverage = { chunksTotal: 1, chunksProcessed: 1, complete: true };
 
         // ── SINGLE PASS (streaming) ──────────────────────────────────────────
         if (mode === "single") {
@@ -227,89 +256,21 @@ export async function POST(req: NextRequest) {
             try {
               const p = JSON.parse(cleanJson(accumulatedText));
               if (!Array.isArray(p.clauses)) throw new Error("clauses not array");
-              parsedResult = p;
+              const validClauses = p.clauses.filter(isValidClause);
+              if (validClauses.length < p.clauses.length) {
+                console.warn(`[scan-stream] dropped ${p.clauses.length - validClauses.length} malformed clause(s) from single-pass`);
+              }
+              parsedResult = { ...p, clauses: validClauses };
               break;
             } catch (e) {
               console.error(`[scan-stream] single-pass parse failed attempt ${attempt + 1}: ${e}`);
               if (attempt >= 1) {
-                // Recoverable — Gemini returned garbled JSON, user can retry
                 await supabase.from("contracts").update({ status: "pending" }).eq("id", contractId);
                 controller.enqueue(sseEvent("error", { message: "AI returned an unreadable response after 2 attempts. Please try again." }));
                 controller.close(); return;
               }
             }
           }
-        }
-
-        // ── TWO PASS ────────────────────────────────────────────────────────
-        else if (mode === "two-pass") {
-          controller.enqueue(sseEvent("status", { message: "Extracting clauses from contract..." }));
-
-          let clauses: Clause[] = [];
-          for (let attempt = 0; attempt < 2; attempt++) {
-            const prompt = attempt === 0
-              ? buildClausesOnlyPrompt(finalText)
-              : buildClausesOnlyPrompt(finalText) + "\n\nCRITICAL: Return ONLY a JSON array starting with [ and ending with ]. No wrapper object.";
-
-            if (attempt === 1) {
-              controller.enqueue(sseEvent("status", { message: "Retrying clause extraction..." }));
-              await new Promise((r) => setTimeout(r, 1000));
-            }
-
-            const geminiStream = await streamGemini(prompt, geminiToken, 16000);
-            let accumulatedText = "";
-            const reader = geminiStream.getReader();
-            const decoder = new TextDecoder();
-
-            while (true) {
-              const { done, value } = await reader.read();
-              if (done) break;
-              const chunk = decoder.decode(value, { stream: true });
-              for (const line of chunk.split("\n")) {
-                if (!line.startsWith("data: ")) continue;
-                const jsonStr = line.slice(6).trim();
-                if (!jsonStr || jsonStr === "[DONE]") continue;
-                try {
-                  const gc = JSON.parse(jsonStr);
-                  const text = gc?.candidates?.[0]?.content?.parts?.[0]?.text;
-                  if (text) { accumulatedText += text; controller.enqueue(sseEvent("chunk", { text })); }
-                } catch { /* malformed chunk */ }
-              }
-            }
-
-            try {
-              const p = JSON.parse(cleanJson(accumulatedText, true));
-              clauses = Array.isArray(p) ? p : (Array.isArray(p.clauses) ? p.clauses : []);
-              debug(`[scan-stream] pass1 clauses=${clauses.length}`);
-              break;
-            } catch (e) {
-              console.error(`[scan-stream] pass1 attempt ${attempt + 1} failed: ${e}`);
-              if (attempt >= 1) clauses = [];
-              else await new Promise((r) => setTimeout(r, 1500));
-            }
-          }
-
-          clauses = deduplicateClauses(clauses);
-          controller.enqueue(sseEvent("status", {
-            message: `Found ${clauses.length} risk areas. Generating summary...`,
-          }));
-
-          let summaryData = { summary: "", risk_score: 0 };
-          try {
-            const { text: rawSum } = await callGemini(buildSynthesisPrompt(clauses), geminiToken, 1024);
-            summaryData = JSON.parse(cleanJson(rawSum));
-          } catch (e) {
-            console.error(`[scan-stream] pass2 failed: ${e}`);
-            const h = clauses.filter((c) => c.severity === "high").length;
-            const m = clauses.filter((c) => c.severity === "medium").length;
-            const l = clauses.filter((c) => c.severity === "low").length;
-            summaryData = {
-              risk_score: Math.min(100, h * 20 + m * 8 + l * 2),
-              summary: `This contract contains ${clauses.length} risk areas: ${h} high-severity, ${m} medium-severity, and ${l} low-severity clauses.`,
-            };
-          }
-
-          parsedResult = { summary: summaryData.summary, risk_score: summaryData.risk_score, clauses };
         }
 
         // ── CHUNKED ──────────────────────────────────────────────────────────
@@ -319,49 +280,94 @@ export async function POST(req: NextRequest) {
           debug(`[scan-stream] chunked: ${totalChunks} chunks`);
 
           controller.enqueue(sseEvent("status", {
-            message: `Analysing ${totalChunks} sections in parallel...`,
+            message: `Analysing ${totalChunks} section${totalChunks !== 1 ? "s" : ""} in parallel...`,
           }));
 
           let allClauses: Clause[] = [];
-          let completedChunks = 0;
+          let chunksProcessed = 0;
+          const scanStartTime = Date.now();
+          let firstBatchAttempted = false;
+          let firstBatchAllFailed = false;
 
-          for (let batchStart = 0; batchStart < totalChunks; batchStart += PARALLEL_BATCH_SIZE) {
+          for (let batchStart = 0; batchStart < chunks.length; batchStart += PARALLEL_BATCH_SIZE) {
+            // ── Wall-clock governor ──────────────────────────────────────────
+            const elapsed = Date.now() - scanStartTime;
+            if (elapsed > SCAN_DEADLINE_MS) {
+              console.warn(`[scan-stream] deadline reached at ${elapsed}ms with ${chunksProcessed}/${totalChunks} chunks — proceeding to synthesis`);
+              controller.enqueue(sseEvent("status", {
+                message: `Analysed ${chunksProcessed} of ${totalChunks} sections. Generating summary...`,
+              }));
+              break;
+            }
+
             const batch = chunks.slice(batchStart, batchStart + PARALLEL_BATCH_SIZE);
             const batchResults = await Promise.all(
               batch.map(async (chunk, batchIdx) => {
-                const idx = batchStart + batchIdx;
+                const chunkIdx = batchStart + batchIdx;
+                const result = await callGeminiWithRetry(buildChunkPrompt(chunk, chunkIdx, totalChunks), geminiToken, 4096);
+
+                if (result === null) return { clauses: [] as Clause[], failed: true, rateLimited: false };
+                if (result.rateLimited) return { clauses: [] as Clause[], failed: true, rateLimited: true };
+
                 try {
-                  const { text: raw } = await callGemini(buildChunkPrompt(chunk, idx, totalChunks), geminiToken, 4096);
-                  const p = JSON.parse(cleanJson(raw, true));
-                  const found = (Array.isArray(p) ? p : []) as Clause[];
-                  completedChunks++;
-                  controller.enqueue(sseEvent("progress", {
-                    completed: completedChunks, total: totalChunks,
-                    message: `Analysed section ${completedChunks} of ${totalChunks}...`,
-                  }));
-                  return found;
-                } catch (e) {
-                  console.error(`[scan-stream] chunk ${idx + 1} failed: ${e}`);
-                  completedChunks++;
-                  controller.enqueue(sseEvent("progress", {
-                    completed: completedChunks, total: totalChunks,
-                    message: `Analysed section ${completedChunks} of ${totalChunks}...`,
-                  }));
-                  return [] as Clause[];
+                  const cleaned = cleanJson(result.text, true);
+                  const rawParsed = JSON.parse(cleaned);
+                  const rawClauses = Array.isArray(rawParsed) ? rawParsed : [];
+                  const validClauses = rawClauses.filter(isValidClause);
+                  if (validClauses.length < rawClauses.length) {
+                    console.warn(`[scan-stream] dropped ${rawClauses.length - validClauses.length} malformed clause(s) from chunk ${chunkIdx}`);
+                  }
+                  return { clauses: validClauses, failed: false, rateLimited: false };
+                } catch {
+                  return { clauses: [] as Clause[], failed: true, rateLimited: false };
                 }
               })
             );
-            allClauses = [...allClauses, ...batchResults.flat()];
-            if (batchStart + PARALLEL_BATCH_SIZE < totalChunks) {
-              await new Promise((r) => setTimeout(r, 500));
+
+            // ── Fail-fast circuit breaker ────────────────────────────────────
+            if (!firstBatchAttempted) {
+              firstBatchAttempted = true;
+              const nonRateLimitFailures = batchResults.filter((r) => r.failed && !r.rateLimited).length;
+              if (nonRateLimitFailures === batchResults.length) {
+                console.error("[scan-stream] first batch entirely failed — aborting");
+                firstBatchAllFailed = true;
+                break;
+              }
+            }
+
+            batchResults.forEach((r) => {
+              allClauses = [...allClauses, ...r.clauses];
+              chunksProcessed++;
+            });
+
+            const doneSoFar = Math.min(chunksProcessed, totalChunks);
+            controller.enqueue(sseEvent("progress", {
+              completed: doneSoFar, total: totalChunks,
+              message: `Analysed section ${doneSoFar} of ${totalChunks}...`,
+            }));
+
+            if (batchStart + PARALLEL_BATCH_SIZE < chunks.length) {
+              await new Promise((r) => setTimeout(r, BATCH_PAUSE_MS));
             }
           }
 
+          if (firstBatchAllFailed) {
+            await adminSupabase.from("contracts").update({ status: "pending" }).eq("id", contractId);
+            controller.enqueue(sseEvent("error", {
+              message: "The AI analysis service is currently unavailable. Please try again in a few minutes.",
+              code: "AI_SERVICE_ERROR",
+            }));
+            controller.close(); return;
+          }
+
+          coverage = { chunksTotal: totalChunks, chunksProcessed, complete: chunksProcessed === totalChunks };
           const clauses = deduplicateClauses(allClauses);
-          debug(`[scan-stream] chunked dedup: ${allClauses.length} → ${clauses.length}`);
+          debug(`[scan-stream] chunked complete: ${totalChunks} chunks, ${chunksProcessed} processed, ${allClauses.length} raw, ${clauses.length} after dedup, coverage.complete=${coverage.complete}`);
 
           controller.enqueue(sseEvent("status", {
-            message: `All ${totalChunks} sections analysed. Found ${clauses.length} risk areas. Generating summary...`,
+            message: coverage.complete
+              ? `All ${totalChunks} sections analysed. Found ${clauses.length} risk area${clauses.length !== 1 ? "s" : ""}. Generating summary...`
+              : `Analysed ${chunksProcessed} of ${totalChunks} sections. Found ${clauses.length} risk area${clauses.length !== 1 ? "s" : ""}. Generating summary...`,
           }));
 
           let summaryData = { summary: "", risk_score: 0 };
@@ -384,7 +390,6 @@ export async function POST(req: NextRequest) {
 
         // ── Safety net ───────────────────────────────────────────────────────
         if (!parsedResult || typeof parsedResult.risk_score !== "number" || !Array.isArray(parsedResult.clauses)) {
-          // Recoverable — user can retry
           await supabase.from("contracts").update({ status: "pending" }).eq("id", contractId);
           controller.enqueue(sseEvent("error", { message: "AI returned an unreadable response. Please try again." }));
           controller.close(); return;
@@ -406,6 +411,9 @@ export async function POST(req: NextRequest) {
             summary: parsedResult.summary ?? "",
             model_used: "gemini-2.5-flash",
             tokens_used: 0,
+            chunks_total: coverage.chunksTotal,
+            chunks_processed: coverage.chunksProcessed,
+            coverage_complete: coverage.complete,
           })
           .select().single();
 
@@ -419,13 +427,13 @@ export async function POST(req: NextRequest) {
             id: scan!.id, risk_score: finalScore,
             summary: parsedResult.summary, clauses: parsedResult.clauses,
             tokens_used: 0, scanned_at: scan!.scanned_at,
+            coverage,
           },
         }));
         controller.close();
 
       } catch (err) {
         console.error("[scan-stream] unhandled error:", err);
-        // Best-effort reset so the user can retry rather than being stuck
         if (contractId) {
           try {
             const s = await createClient();

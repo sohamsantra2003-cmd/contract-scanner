@@ -15,6 +15,11 @@ export type ScanResult = {
   clauses: Clause[];
   tokens_used: number;
   scanned_at: string;
+  coverage?: {
+    chunksTotal: number;
+    chunksProcessed: number;
+    complete: boolean;
+  };
 };
 
 export function cleanContractText(raw: string): string {
@@ -39,12 +44,28 @@ export function calculateOutputTokens(cleanedTextLength: number): number {
   return 16000;
 }
 
-export type AnalysisMode = "single" | "two-pass" | "chunked";
+export type AnalysisMode = "single" | "chunked";
 
 export function getAnalysisMode(cleanedTextLength: number): AnalysisMode {
-  if (cleanedTextLength < 25000)  return "single";
-  if (cleanedTextLength < 120000) return "two-pass";
+  if (cleanedTextLength < 15000) return "single";
   return "chunked";
+}
+
+const VALID_CATEGORIES = [
+  "payment_terms", "liability", "auto_renewal", "IP", "termination", "other",
+];
+const VALID_SEVERITIES = ["high", "medium", "low"];
+
+export function isValidClause(obj: unknown): obj is Clause {
+  if (!obj || typeof obj !== "object") return false;
+  const c = obj as Record<string, unknown>;
+  return (
+    typeof c.text === "string" && c.text.trim().length > 0 &&
+    typeof c.category === "string" && VALID_CATEGORIES.includes(c.category) &&
+    typeof c.severity === "string" && VALID_SEVERITIES.includes(c.severity) &&
+    typeof c.explanation === "string" && c.explanation.trim().length > 0 &&
+    typeof c.rewrite === "string"
+  );
 }
 
 export function deduplicateClauses(clauses: Clause[]): Clause[] {
